@@ -1,4 +1,3 @@
-import sourcemaps from 'rollup-plugin-sourcemaps';
 import commonjs from 'rollup-plugin-commonjs';
 import nodeResolve from 'rollup-plugin-node-resolve';
 import path from 'path';
@@ -13,13 +12,12 @@ export default {
   output: {
     file: path.resolve(__dirname, '../../test/bundle.js'),
     format: 'umd',
-    sourcemap: true,
+    sourcemap: false,
     name: 'dexieTests',
     globals: {dexie: "Dexie", QUnit: "QUnit"},
   },
   external: ['dexie', 'QUnit'],
   plugins: [
-    sourcemaps(),
     nodeResolve({browser: true}),
     commonjs()
   ],
@@ -30,6 +28,6 @@ export default {
       if ( frame ) console.warn( frame );
     } else {
       console.warn(`${code} ${message}`);
-    }    
+    }
   }
 };

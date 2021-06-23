@@ -1,4 +1,3 @@
-import sourcemaps from 'rollup-plugin-sourcemaps';
 import nodeResolve from 'rollup-plugin-node-resolve';
 import cleanup from 'rollup-plugin-cleanup';
 
@@ -18,12 +17,12 @@ export default {
     format: 'umd',
     name: 'Dexie',
     globals: {}, // For tests, use "QUnit". For addons, use "Dexie"
-    sourcemap: true,
+    indent: false,
+    sourcemap: false,
     banner: readFileSync(path.resolve(__dirname, 'banner.txt')),
   }],
   plugins: [
-    sourcemaps(),
-    nodeResolve({module: true, jsnext: true, browser: true, ignoreGlobal: false}),
+    nodeResolve({browser: true, ignoreGlobal: false}),
     cleanup()
   ],
   onwarn ({loc, frame, code, message}) {
@@ -33,6 +32,6 @@ export default {
       if ( frame ) console.warn( frame );
     } else {
       console.warn(`${code} ${message}`);
-    }    
+    }
   }
 };

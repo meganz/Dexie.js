@@ -52,6 +52,7 @@ export function DatabaseEnumerator (indexedDB: IDBFactory & {databases?: ()=>Pro
 
 export function initDatabaseEnumerator(indexedDB: IDBFactory) {
   try {
+    // @ts-ignore
     databaseEnumerator = DatabaseEnumerator(indexedDB);
   } catch (e) {}
 }

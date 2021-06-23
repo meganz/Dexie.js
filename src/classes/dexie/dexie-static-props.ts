@@ -19,7 +19,7 @@ import { vip } from './vip';
 
 /* (Dexie) is an instance of DexieConstructor, as defined in public/types/dexie-constructor.d.ts
 *  (new Dexie()) is an instance of Dexie, as defined in public/types/dexie.d.ts
-* 
+*
 * Why we're doing this?
 
 * Because we've choosen to define the public Dexie API using a DexieConstructor interface
@@ -32,7 +32,7 @@ const Dexie = _Dexie as any as DexieConstructor;
 
 //
 // Set all static methods and properties onto Dexie:
-// 
+//
 props(Dexie, {
 
   // Dexie.BulkError = class BulkError {...};
@@ -138,7 +138,7 @@ props(Dexie, {
       typeof promiseOrFunction === 'function' ?
         Dexie.ignoreTransaction(promiseOrFunction) :
         promiseOrFunction)
-      .timeout(optionalTimeout || 60000); // Default the timeout to one minute. Caller may specify Infinity if required.       
+      .timeout(optionalTimeout || 60000); // Default the timeout to one minute. Caller may specify Infinity if required.
 
     // Run given promise on current transaction. If no current transaction, just return a Dexie promise based
     // on given value.
@@ -213,19 +213,19 @@ props(Dexie, {
   // API Version Number: Type Number, make sure to always set a version number that can be comparable correctly. Example: 0.9, 0.91, 0.92, 1.0, 1.01, 1.1, 1.2, 1.21, etc.
   semVer: DEXIE_VERSION,
   version: DEXIE_VERSION.split('.')
-    .map(n => parseInt(n))
+    .map(n => parseInt(n) | 0)
     .reduce((p, c, i) => p + (c / Math.pow(10, i * 2))),
 
   // https://github.com/dfahlander/Dexie.js/issues/186
   // typescript compiler tsc in mode ts-->es5 & commonJS, will expect require() to return
   // x.default. Workaround: Set Dexie.default = Dexie.
-  default: Dexie,
+  // default: Dexie, // Commented because solved in index-umd.ts instead.
   // Make it possible to import {Dexie} (non-default import)
   // Reason 1: May switch to that in future.
   // Reason 2: We declare it both default and named exported in d.ts to make it possible
   // to let addons extend the Dexie interface with Typescript 2.1 (works only when explicitely
   // exporting the symbol, not just default exporting)
-  Dexie: Dexie
+  // Dexie: Dexie // Commented because solved in index-umd.ts instead.
 });
 
 Dexie.maxKey = getMaxKey(Dexie.dependencies.IDBKeyRange);

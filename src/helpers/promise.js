@@ -3,7 +3,7 @@
  * Apache License Version 2.0, January 2004, http://www.apache.org/licenses/LICENSE-2.0
  */
 import {tryCatch, props, setProp, _global,
-    getPropertyDescriptor, getArrayOf, extend} from '../functions/utils';
+    getPropertyDescriptor, getArrayOf, extend, getProto} from '../functions/utils';
 import {nop, callBoth, mirror} from '../functions/chaining-functions';
 import {debug, prettyStack, getErrorWithStack} from './debug';
 import {exceptions} from '../errors';
@@ -26,7 +26,7 @@ import {exceptions} from '../errors';
 //   native async / await.
 // * Promise.follow() method built upon the custom zone engine, that allows user to track all promises created from current stack frame
 //   and below + all promises that those promises creates or awaits.
-// * Detect any unhandled promise in a PSD-scope (PSD.onunhandled). 
+// * Detect any unhandled promise in a PSD-scope (PSD.onunhandled).
 //
 // David Fahlander, https://github.com/dfahlander
 //
@@ -38,24 +38,21 @@ var INTERNAL = {};
 // Async stacks (long stacks) must not grow infinitely.
 const
     LONG_STACKS_CLIP_LIMIT = 100,
-    // When calling error.stack or promise.stack, limit the number of asyncronic stacks to print out. 
+    // When calling error.stack or promise.stack, limit the number of asyncronic stacks to print out.
     MAX_LONG_STACKS = 20,
     ZONE_ECHO_LIMIT = 100,
-    [resolvedNativePromise, nativePromiseProto, resolvedGlobalPromise] = typeof Promise === 'undefined' ?
-        [] :
-        (()=>{
+    [resolvedNativePromise, nativePromiseProto, resolvedGlobalPromise] = (()=>{
             let globalP = Promise.resolve();
             if (typeof crypto === 'undefined' || !crypto.subtle)
-                return [globalP, globalP.__proto__, globalP];
+                return [globalP, getProto(globalP), globalP];
             // Generate a native promise (as window.Promise may have been patched)
             const nativeP = crypto.subtle.digest("SHA-512", new Uint8Array([0]));
             return [
                 nativeP,
-                nativeP.__proto__,
+                getProto(nativeP),
                 globalP
             ];
-        })(),
-    nativePromiseThen = nativePromiseProto && nativePromiseProto.then;
+        })()
 
 export const NativePromise = resolvedNativePromise && resolvedNativePromise.constructor;
 const patchGlobalPromise = !!resolvedGlobalPromise;
@@ -64,31 +61,14 @@ var stack_being_generated = false;
 
 /* The default function used only for the very first promise in a promise chain.
    As soon as then promise is resolved or rejected, all next tasks will be executed in micro ticks
-   emulated in this module. For indexedDB compatibility, this means that every method needs to 
-   execute at least one promise before doing an indexedDB operation. Dexie will always call 
+   emulated in this module. For indexedDB compatibility, this means that every method needs to
+   execute at least one promise before doing an indexedDB operation. Dexie will always call
    db.ready().then() for every operation to make sure the indexedDB event is started in an
    indexedDB-compatible emulated micro task loop.
 */
-var schedulePhysicalTick = resolvedGlobalPromise ?
-    () => {resolvedGlobalPromise.then(physicalTick);}
-    :
-    _global.setImmediate ? 
-        // setImmediate supported. Those modern platforms also supports Function.bind().
-        setImmediate.bind(null, physicalTick) :
-        _global.MutationObserver ?
-            // MutationObserver supported
-            () => {
-                var hiddenDiv = document.createElement("div");
-                (new MutationObserver(() => {
-                    physicalTick();
-                    hiddenDiv = null;
-                })).observe(hiddenDiv, { attributes: true });
-                hiddenDiv.setAttribute('i', '1');
-            } :
-            // No support for setImmediate or MutationObserver. No worry, setTimeout is only called
-            // once time. Every tick that follows will be our emulated micro tick.
-            // Could have uses setTimeout.bind(null, 0, physicalTick) if it wasnt for that FF13 and below has a bug 
-            ()=>{setTimeout(physicalTick,0);};
+const schedulePhysicalTick = () => {
+    queueMicrotask(physicalTick);
+}
 
 // Configurable through Promise.scheduler.
 // Don't export because it would be unsafe to let unknown
@@ -109,7 +89,7 @@ var isOutsideMicroTick = true, // True when NOT in a virtual microTick.
     rejectingErrors = [], // Tracks if errors are being re-rejected during onRejected callback.
     currentFulfiller = null,
     rejectionMapper = mirror; // Remove in next major when removing error mapping of DOMErrors and DOMExceptions
-    
+
 export var globalPSD = {
     id: 'global',
     global: true,
@@ -134,10 +114,9 @@ export var numScheduledCalls = 0; // Number of listener-calls left to do in this
 export var tickFinalizers = []; // Finalizers to call when there are no more async calls scheduled within current physical tick.
 
 export default function DexiePromise(fn) {
-    if (typeof this !== 'object') throw new TypeError('Promises must be constructed via new');    
     this._listeners = [];
     this.onuncatched = nop; // Deprecate in next major. Not needed. Better to use global error handler.
-    
+
     // A library may set `promise._lib = true;` after promise is created to make resolve() or reject()
     // execute the microtask engine implicitely within the call to resolve() or reject().
     // To remain A+ compliant, a library must only set `_lib=true` if it can guarantee that the stack
@@ -153,7 +132,7 @@ export default function DexiePromise(fn) {
         this._prev = null;
         this._numPrev = 0; // Number of previous promises (for long stacks)
     }
-    
+
     if (typeof fn !== 'function') {
         if (fn !== INTERNAL) throw new TypeError('Not a function');
         // Private constructor (INTERNAL, state, value).
@@ -164,7 +143,7 @@ export default function DexiePromise(fn) {
             handleRejection(this, this._value); // Map error, set stack and addPossiblyUnhandledError().
         return;
     }
-    
+
     this._state = null; // null (=pending), false (=rejected) or true (=resolved)
     this._value = null; // error or result
     ++psd.ref; // Refcounting current scope
@@ -214,8 +193,10 @@ props(DexiePromise.prototype, {
     then: thenProp, // Defined above.
     _then: function (onFulfilled, onRejected) {
         // A little tinier version of then() that don't have to create a resulting promise.
-        propagateToListener(this, new Listener(null, null, onFulfilled, onRejected, PSD));        
+        propagateToListener(this, new Listener(null, null, onFulfilled, onRejected, PSD));
     },
+    dump: NativePromise.prototype.dump,
+    always: NativePromise.prototype.always,
 
     catch: function (onRejected) {
         if (arguments.length === 1) return this.then(null, onRejected);
@@ -242,7 +223,7 @@ props(DexiePromise.prototype, {
             return PromiseReject(err);
         });
     },
-    
+
     stack: {
         get: function() {
             if (this._stack) return this._stack;
@@ -286,17 +267,19 @@ function Listener(onFulfilled, onRejected, resolve, reject, zone) {
 props (DexiePromise, {
     all: function () {
         var values = getArrayOf.apply(null, arguments) // Supports iterables, implicit arguments and array-like.
-            .map(onPossibleParallellAsync); // Handle parallell async/awaits 
+            .map(onPossibleParallellAsync); // Handle parallell async/awaits
         return new DexiePromise(function (resolve, reject) {
-            if (values.length === 0) resolve([]);
+            if (values.length === 0) return resolve([]);
             var remaining = values.length;
-            values.forEach((a,i) => DexiePromise.resolve(a).then(x => {
+            values.forEach((a, i) => DexiePromise.resolve(a).then(x => {
                 values[i] = x;
-                if (!--remaining) resolve(values);
+                if (!--remaining) {
+                    resolve(values);
+                }
             }, reject));
         });
     },
-    
+
     resolve: value => {
         if (value instanceof DexiePromise) return value;
         if (value && typeof value.then === 'function') return new DexiePromise((resolve, reject)=>{
@@ -306,9 +289,9 @@ props (DexiePromise, {
         linkToPreviousPromise(rv, currentFulfiller);
         return rv;
     },
-    
+
     reject: PromiseReject,
-    
+
     race: function () {
         var values = getArrayOf.apply(null, arguments).map(onPossibleParallellAsync);
         return new DexiePromise((resolve, reject) => {
@@ -324,21 +307,21 @@ props (DexiePromise, {
     totalEchoes: {get: ()=>totalEchoes},
 
     //task: {get: ()=>task},
-    
+
     newPSD: newScope,
-    
+
     usePSD: usePSD,
-    
+
     scheduler: {
         get: () => asap,
         set: value => {asap = value}
     },
-    
+
     rejectionMapper: {
         get: () => rejectionMapper,
         set: value => {rejectionMapper = value;} // Map reject failures
     },
-            
+
     follow: (fn, zoneProps) => {
         return new DexiePromise((resolve, reject) => {
             return newScope((resolve, reject) => {
@@ -363,7 +346,7 @@ if (NativePromise) {
     if (NativePromise.allSettled) setProp (DexiePromise, "allSettled", function() {
         const possiblePromises = getArrayOf.apply(null, arguments).map(onPossibleParallellAsync);
         return new DexiePromise(resolve => {
-            if (possiblePromises.length === 0) resolve([]);
+            if (possiblePromises.length === 0) return resolve([]);
             let remaining = possiblePromises.length;
             const results = new Array(remaining);
             possiblePromises.forEach((p, i) => DexiePromise.resolve(p).then(
@@ -375,7 +358,7 @@ if (NativePromise) {
     if (NativePromise.any && typeof AggregateError !== 'undefined') setProp(DexiePromise, "any", function() {
         const possiblePromises = getArrayOf.apply(null, arguments).map(onPossibleParallellAsync);
         return new DexiePromise((resolve, reject) => {
-            if (possiblePromises.length === 0) reject(new AggregateError([]));
+            if (possiblePromises.length === 0) return reject(new AggregateError([]));
             let remaining = possiblePromises.length;
             const failures = new Array(remaining);
             possiblePromises.forEach((p, i) => DexiePromise.resolve(p).then(
@@ -414,7 +397,7 @@ function executePromiseTask (promise, fn) {
                 propagateAllListeners(promise);
             }
             if (shouldExecuteTick) endMicroTickScope();
-        }, handleRejection.bind(null, promise)); // If Function.bind is not supported. Exception is handled in catch below
+        }, ex => handleRejection(promise, ex));
     } catch (ex) {
         handleRejection(promise, ex);
     }
@@ -427,15 +410,15 @@ function handleRejection (promise, reason) {
     reason = rejectionMapper(reason);
     promise._state = false;
     promise._value = reason;
-    debug && reason !== null && typeof reason === 'object' && !reason._promise && tryCatch(()=>{
-        var origProp = getPropertyDescriptor(reason, "stack");        
-        reason._promise = promise;    
+    debug && reason !== null && typeof reason === 'object' && !reason._promise && tryCatch(()=> {
+        var origProp = getPropertyDescriptor(reason, "stack");
+        reason._promise = promise;
         setProp(reason, "stack", {
             get: () =>
                 stack_being_generated ?
                     origProp && (origProp.get ?
-                                origProp.get.apply(reason) :
-                                origProp.value) :
+                    origProp.get.apply(reason) :
+                    origProp.value) :
                     promise.stack
         });
     });
@@ -488,10 +471,10 @@ function callListener (cb, promise, listener) {
         // Set static variable currentFulfiller to the promise that is being fullfilled,
         // so that we connect the chain of promises (for long stacks support)
         currentFulfiller = promise;
-        
+
         // Call callback and resolve our listener with it's return value.
         var ret, value = promise._value;
-            
+
         if (promise._state) {
             // cb is onResolved
             ret = cb (value);
@@ -521,7 +504,7 @@ function getStack (promise, stacks, limit) {
         var failure = promise._value,
             errorName,
             message;
-        
+
         if (failure != null) {
             errorName = failure.name || "Error";
             message = failure.message || failure;
@@ -596,7 +579,7 @@ function finalizePhysicalTick() {
     });
     var finalizers = tickFinalizers.slice(0); // Clone first because finalizer may remove itself from list.
     var i = finalizers.length;
-    while (i) finalizers[--i]();    
+    while (i) finalizers[--i]();
 }
 
 function run_at_end_of_this_or_next_physical_tick (fn) {
@@ -688,7 +671,7 @@ export function newScope (fn, props, a1, a2) {
         gthen: getPatchedPromiseThen (globalEnv.gthen, psd) // global then
     } : {};
     if (props) extend(psd, props);
-    
+
     // unhandleds and onunhandled should not be specifically set here.
     // Leave them on parent prototype.
     // unhandleds.push(err) will push to parent's prototype
@@ -721,16 +704,10 @@ export function decrementExpectedAwaits() {
     return true;
 }
 
-if ((''+nativePromiseThen).indexOf('[native code]') === -1) {
-    // If the native promise' prototype is patched, we cannot rely on zone echoing.
-    // Disable that here:
-    incrementExpectedAwaits = decrementExpectedAwaits = nop;
-}
-
 // Call from Promise.all() and Promise.race()
 export function onPossibleParallellAsync (possiblePromise) {
     if (task.echoes && possiblePromise && possiblePromise.constructor === NativePromise) {
-        incrementExpectedAwaits(); 
+        incrementExpectedAwaits();
         return possiblePromise.then(x => {
             decrementExpectedAwaits();
             return x;
@@ -829,10 +806,7 @@ export function usePSD (psd, fn, a1, a2, a3) {
 }
 
 function enqueueNativeMicroTask (job) {
-    //
-    // Precondition: nativePromiseThen !== undefined
-    //
-    nativePromiseThen.call(resolvedNativePromise, job);
+    queueMicrotask(job);
 }
 
 function nativeAwaitCompatibleWrap(fn, zone, possibleAwait, cleanup) {

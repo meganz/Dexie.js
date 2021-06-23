@@ -13,12 +13,9 @@ if (typeof Promise !== 'undefined' && !_global.Promise){
 }
 export { _global }
 
-export function extend(obj, extension) {
-    if (typeof extension !== 'object') return obj;
-    keys(extension).forEach(function (key) {
-        obj[key] = extension[key];
-    });
-    return obj;
+export function extend<T extends object, X extends object>(obj: T, extension: X): T & X {
+    if (typeof extension !== 'object') return obj as T & X;
+    return Object.assign(obj, extension) as T & X;
 }
 
 export const getProto = Object.getPrototypeOf;
@@ -29,9 +26,10 @@ export function hasOwn(obj, prop) {
 
 export function props (proto, extension) {
     if (typeof extension === 'function') extension = extension(getProto(proto));
-    keys(extension).forEach(key => {
-        setProp(proto, key, extension[key]);
-    });
+    const keys = Reflect.ownKeys(extension);
+    for (let i = keys.length; i--;) {
+        setProp(proto, keys[i], extension[keys[i]]);
+    }
 }
 
 export const defineProperty = Object.defineProperty;
@@ -76,8 +74,7 @@ export function assert (b) {
 }
 
 export function asap(fn) {
-    // @ts-ignore
-    if (_global.setImmediate) setImmediate(fn); else setTimeout(fn, 0);
+    queueMicrotask(fn);
 }
 
 export function getUniqueArray(a) {
@@ -177,11 +174,7 @@ export function delByKeyPath(obj, keyPath) {
 }
 
 export function shallowClone(obj) {
-    var rv = {};
-    for (var m in obj) {
-        if (hasOwn(obj, m)) rv[m] = obj[m];
-    }
-    return rv;
+    return ({...obj});
 }
 
 const concat = [].concat;
@@ -191,28 +184,40 @@ export function flatten<T> (a: (T | T[])[]) : T[] {
 
 //https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
 const intrinsicTypeNames =
-    "Boolean,String,Date,RegExp,Blob,File,FileList,ArrayBuffer,DataView,Uint8ClampedArray,ImageData,Map,Set"
+    "Boolean,String,Date,RegExp,Blob,File,FileList,ArrayBuffer,DataView,Uint8ClampedArray,ImageBitmap,ImageData,Map,Set,CryptoKey"
     .split(',').concat(
         flatten([8,16,32,64].map(num=>["Int","Uint","Float"].map(t=>t+num+"Array")))
     ).filter(t=>_global[t]);
 const intrinsicTypes = intrinsicTypeNames.map(t=>_global[t]);
 const intrinsicTypeNameSet = arrayToObject(intrinsicTypeNames, x=>[x,true]);
 
+let circularRefs: null | WeakMap<any, any> = null;
 export function deepClone<T>(any: T): T {
+    circularRefs = new WeakMap();
+    const rv = innerDeepClone(any);
+    circularRefs = null;
+    return rv;
+}
+
+function innerDeepClone<T>(any: T): T {
     if (!any || typeof any !== 'object') return any;
-    var rv;
+    let rv = circularRefs && circularRefs.get(any); // Resolve circular references
+    if (rv) return rv;
     if (isArray(any)) {
         rv = [];
-        for (var i = 0, l = any.length; i < l; ++i) {
-            rv.push(deepClone(any[i]));
+        circularRefs && circularRefs.set(any, rv);
+        for (let i = 0, l = any.length; i < l; ++i) {
+            rv.push(innerDeepClone(any[i]));
         }
     } else if (intrinsicTypes.indexOf(any.constructor) >= 0) {
         rv = any;
     } else {
-        rv = any.constructor ? Object.create(any.constructor.prototype) : {};
-        for (var prop in any) {
+        const proto = getProto(any);
+        rv = proto === Object.prototype ? {} : Object.create(proto);
+        circularRefs && circularRefs.set(any, rv);
+        for (let prop in any) {
             if (hasOwn(any, prop)) {
-                rv[prop] = deepClone(any[prop]);
+                rv[prop] = innerDeepClone(any[prop]);
             }
         }
     }
@@ -224,30 +229,29 @@ export function toStringTag(o: Object) {
     return toString.call(o).slice(8, -1);
 }
 
-export const getValueOf = (val:any, type: string) => 
+export const getValueOf = (val:any, type: string) =>
     type === "Array" ? ''+val.map(v => getValueOf(v, toStringTag(v))) :
     type === "ArrayBuffer" ? ''+new Uint8Array(val) :
     type === "Date" ? val.getTime() :
     ArrayBuffer.isView(val) ? ''+new Uint8Array(val.buffer) :
     val;
 
- export function getObjectDiff(a, b, rv?, prfx?) {
+export function getObjectDiff(a, b, rv?, prfx?) {
     // Compares objects a and b and produces a diff object.
     rv = rv || {};
     prfx = prfx || '';
-    keys(a).forEach(prop => {
+    for (const prop in a) {
         if (!hasOwn(b, prop))
-            rv[prfx+prop] = undefined; // Property removed
+            rv[prfx + prop] = undefined; // Property removed
         else {
             var ap = a[prop],
                 bp = b[prop];
-            if (typeof ap === 'object' && typeof bp === 'object' && ap && bp)
-            {
+            if (typeof ap === 'object' && typeof bp === 'object' && ap && bp) {
                 const apTypeName = toStringTag(ap);
                 const bpTypeName = toStringTag(bp);
 
                 if (apTypeName === bpTypeName) {
-                    if (intrinsicTypeNameSet[apTypeName]) {
+                    if (intrinsicTypeNameSet[apTypeName] || isArray(ap)) {
                         // This is an intrinsic type. Don't go deep diffing it.
                         // Instead compare its value in best-effort:
                         // (Can compare real values of Date, ArrayBuffers and views)
@@ -260,25 +264,24 @@ export const getValueOf = (val:any, type: string) =>
                     }
                 } else {
                     rv[prfx + prop] = b[prop];// Property changed to other type
-                }                
+                }
             } else if (ap !== bp)
                 rv[prfx + prop] = b[prop];// Primitive value changed
         }
-    });
-    keys(b).forEach(prop => {
+    }
+    for (const prop in b) {
         if (!hasOwn(a, prop)) {
-            rv[prfx+prop] = b[prop]; // Property added
+            rv[prfx + prop] = b[prop]; // Property added
         }
-    });
+    }
     return rv;
 }
 
 // If first argument is iterable or array-like, return it as an array
-export const iteratorSymbol = typeof Symbol !== 'undefined' && Symbol.iterator;
-export const getIteratorOf = iteratorSymbol ? function(x) {
-    var i;
-    return x != null && (i = x[iteratorSymbol]) && i.apply(x);
-} : function () { return null; };
+export function getIteratorOf(x) {
+    let i;
+    return x != null && (i = x[Symbol.iterator]) && i.apply(x);
+}
 
 export const NO_CHAR_ARRAY = {};
 // Takes one or several arguments and returns an array based on the following criteras:

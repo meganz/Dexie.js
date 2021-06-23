@@ -2,7 +2,6 @@
 node_modules/
 
 # Ignore all build output
-dist/*.js
 dist/*.map
 dist/*.ts
 dist/*.gz
