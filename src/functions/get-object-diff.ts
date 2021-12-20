@@ -4,12 +4,12 @@ export function getObjectDiff(a: any, b: any, rv?: any, prfx?: string) {
   // Compares objects a and b and produces a diff object.
   rv = rv || {};
   prfx = prfx || '';
-  keys(a).forEach((prop) => {
+  for (const prop in a) {
     if (!hasOwn(b, prop)) {
       // Property removed
       rv[prfx + prop] = undefined;
     } else {
-      var ap = a[prop],
+      const ap = a[prop],
         bp = b[prop];
       if (typeof ap === 'object' && typeof bp === 'object' && ap && bp) {
         const apTypeName = toStringTag(ap);
@@ -29,11 +29,11 @@ export function getObjectDiff(a: any, b: any, rv?: any, prfx?: string) {
         }
       } else if (ap !== bp) rv[prfx + prop] = b[prop]; // Primitive value changed
     }
-  });
-  keys(b).forEach((prop) => {
+  }
+  for (const prop in b) {
     if (!hasOwn(a, prop)) {
       rv[prfx + prop] = b[prop]; // Property added
     }
-  });
+  }
   return rv;
 }

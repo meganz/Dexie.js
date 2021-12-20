@@ -16,6 +16,7 @@ import { debug } from '../../helpers/debug';
 import { DBCoreTable } from '../../public/types/dbcore';
 import { AnyRange } from '../../dbcore/keyrange';
 import { workaroundForUndefinedPrimKey } from '../../functions/workaround-undefined-primkey';
+import { cmp } from "../../functions/cmp";
 
 /** class Table
  *
@@ -82,6 +83,45 @@ export class Table implements ITable<any, IndexableType> {
     }).then(cb);
   }
 
+  /** Table.getKey()
+   *
+   * http://dexie.org/docs/Table/Table.getKey()
+   *
+   **/
+  getKey(keyOrCrit, cb?) {
+    if (keyOrCrit && keyOrCrit.constructor === Object)
+      return this.where(keyOrCrit as { [key: string]: IndexableType }).first(cb);
+
+    return this._trans('readonly', (trans) => {
+      return this.core.get({trans, key: keyOrCrit, method: 'getKey'})
+          .then(res => this.hook.reading.fire(res));
+    }).then(cb);
+  }
+
+  /** Table.bulkGet()
+   *
+   * http://dexie.org/docs/Table/Table.bulkGet()
+   *
+   * @param keys
+   */
+  getKeys(keys: IndexableType[]) {
+    return this._trans('readonly', trans => {
+      return this.core.getMany({
+        keys,
+        trans,
+        method: 'getKey'
+      }).then(result => result.map(res => this.hook.reading.fire(res)).filter(Boolean));
+    });
+  }
+
+  exists(keys) {
+    const a = isArray(keys);
+    if (!a || keys.length == 1) {
+      return this.getKey(a ? keys[0] : keys).then(res => res ? a ? [res] : res : false);
+    }
+    return this.getKeys(keys);
+  }
+
   /** Table.where()
    *
    * http://dexie.org/docs/Table/Table.where()
@@ -122,14 +162,8 @@ export class Table implements ITable<any, IndexableType> {
     // Ok, now let's fallback to finding at least one matching index
     // and filter the rest.
     const { idxByName } = this.schema;
-    const idb = this.db._deps.indexedDB;
-
     function equals (a, b) {
-      try {
-        return idb.cmp(a,b) === 0; // Works with all indexable types including binary keys.
-      } catch (e) {
-        return false;
-      }
+      return cmp(a,b) === 0; // Works with all indexable types including binary keys.
     }
 
     const [idx, filterFunction] = keyPaths.reduce(([prevIndex, prevFilterFn], keyPath) => {

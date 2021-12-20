@@ -8,8 +8,8 @@ import { dexieStackFrameFilter } from './globals/constants';
 // Generate all static properties such as Dexie.maxKey etc
 // (implement interface DexieConstructor):
 import './classes/dexie/dexie-static-props';
-import './live-query/enable-broadcast';
-import { liveQuery } from './live-query/live-query';
+// import './live-query/enable-broadcast';
+// import { liveQuery } from './live-query/live-query';
 
 // Set rejectionMapper of DexiePromise so that it generally tries to map
 // DOMErrors and DOMExceptions to a DexieError instance with same name but with
@@ -20,6 +20,6 @@ DexiePromise.rejectionMapper = mapError;
 // Let the async stack filter focus on app code and filter away frames from dexie.min.js:
 Debug.setDebug(Debug.debug, dexieStackFrameFilter);
 
-export { RangeSet, mergeRanges, rangesOverlap } from "./helpers/rangeset";
-export { Dexie, liveQuery }; // Comply with public/index.d.ts.
+// export { RangeSet, mergeRanges, rangesOverlap } from "./helpers/rangeset";
+export { Dexie }; // Comply with public/index.d.ts.
 export default Dexie;

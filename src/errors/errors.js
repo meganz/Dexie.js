@@ -44,7 +44,7 @@ var defaultTexts = {
     DatabaseClosed: "Database has been closed",
     Abort: "Transaction aborted",
     TransactionInactive: "Transaction has already completed or failed",
-    MissingAPI: "IndexedDB API missing. Please visit https://tinyurl.com/y2uuvskb"
+    MissingAPI: "IndexedDB API missing."
 };
 
 //

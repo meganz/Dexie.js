@@ -131,15 +131,15 @@ export function createDBCore (
 
         let req: IDBRequest;
         const reqs: IDBRequest[] = [];
-          
+
         const failures: {[operationNumber: number]: Error} = [];
         let numFailures = 0;
-        const errorHandler = 
+        const errorHandler =
           event => {
             ++numFailures;
             preventDefault(event);
           };
-  
+
         if (type === 'deleteRange') {
           // Here the argument is the range
           if (range.type === DBCoreRangeType.Never)
@@ -172,24 +172,27 @@ export function createDBCore (
         }
         const done = event => {
           const lastResult = event.target.result;
-          reqs.forEach((req, i) => req.error != null && (failures[i] = req.error));
+          for (let i = reqs.length; i--;) {
+            if (reqs[i].error != null) failures[i] = reqs[i].error;
+            reqs[i] = reqs[i].result;
+          }
           resolve({
             numFailures,
             failures,
-            results: type === "delete" ? keys : reqs.map(req => req.result),
+            results: type === "delete" ? keys : reqs,
             lastResult
           });
         };
-  
+
         req.onerror = event => { // wrap() not needed. All paths calling outside will wrap!
           errorHandler(event);
           done(event);
         };
-  
+
         req.onsuccess = done;
       });
     }
-    
+
     function openCursor ({trans, values, query, reverse, unique}: DBCoreOpenCursorRequest): Promise<DBCoreCursor>
     {
       return new Promise((resolve, reject) => {
@@ -212,7 +215,7 @@ export function createDBCore (
         const req = values || !('openKeyCursor' in source) ?
           source.openCursor(makeIDBKeyRange(range), direction) :
           source.openKeyCursor(makeIDBKeyRange(range), direction);
-          
+
         // iteration
         req.onerror = eventRejectHandler(reject);
         req.onsuccess = wrap(ev => {
@@ -280,10 +283,10 @@ export function createDBCore (
             return iterationPromise;
           };
           resolve(cursor);
-        }, reject); 
+        }, reject);
       });
     }
-  
+
     function query (hasGetAll: boolean) {
       return (request: DBCoreQueryRequest) => {
         return new Promise<DBCoreQueryResponse>((resolve, reject) => {
@@ -319,14 +322,14 @@ export function createDBCore (
         });
       };
     }
-  
+
     return {
       name: tableName,
       schema: tableSchema,
-      
+
       mutate,
 
-      getMany ({trans, keys}) {
+      getMany ({trans, keys, method = 'get'}) {
         return new Promise<any[]>((resolve, reject) => {
           resolve = wrap(resolve);
           const store = (trans as IDBTransaction).objectStore(tableName);
@@ -336,18 +339,18 @@ export function createDBCore (
           let callbackCount = 0;
           let valueCount = 0;
           let req: IDBRequest & {_pos?: number};
-    
+
           const successHandler = event => {
             const req = event.target;
             if ((result[req._pos] = req.result) != null) ++valueCount;
             if (++callbackCount === keyCount) resolve(result);
           };
           const errorHandler = eventRejectHandler(reject);
-    
+
           for (let i=0; i<length; ++i) {
             const key = keys[i];
             if (key != null) {
-              req = store.get(keys[i]);
+              req = store[method](keys[i]);
               req._pos = i;
               req.onsuccess = successHandler;
               req.onerror = errorHandler;
@@ -358,18 +361,18 @@ export function createDBCore (
         });
       },
 
-      get ({trans, key}) {
+      get ({trans, key, method = 'get'}) {
         return new Promise<any>((resolve, reject) => {
           resolve = wrap (resolve);
           const store = (trans as IDBTransaction).objectStore(tableName);
-          const req = store.get(key);
+          const req = store[method](key);
           req.onsuccess = event => resolve((event.target as any).result);
           req.onerror = eventRejectHandler(reject);
         });
       },
 
       query: query(hasGetAll),
-      
+
       openCursor,
 
       count ({query, trans}) {
@@ -392,7 +395,7 @@ export function createDBCore (
   tables.forEach(table => tableMap[table.name] = table);
   return {
     stack: "dbcore",
-    
+
     transaction: db.transaction.bind(db),
 
     table(name: string) {
