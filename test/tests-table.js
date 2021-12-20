@@ -6,6 +6,7 @@ var db = new Dexie("TestDBTable");
 db.version(1).stores({
     users: "++id,first,last,&username,*&email,*pets",
     folks: "++,first,last",
+    items: "id",
     schema: "" // Test issue #1039
 });
 
@@ -94,6 +95,13 @@ promisedTest("Issue #966 - put() with dotted field in update hook", async () => 
     equal(obj.nested, undefined, "obj.nested field should have remained undefined");
 
     db.folks.hook("updating").unsubscribe(updateAssertions);
+});
+
+promisedTest("update array property", async () => {
+    const id = await db.items.put({id: 1, foo: [{bar: 123}]});
+    await db.items.update(1, {foo: [{bar: 222}]});
+    const obj = await db.items.get(1);
+    equal(JSON.stringify(obj.foo), JSON.stringify([{bar: 222}]), "foo har been updated to the new array");
 });
 
 promisedTest("Verify #1130 doesn't break contract of hook('updating')", async ()=>{
@@ -536,6 +544,42 @@ spawnedTest("bulkAdd-catch sub transaction", function*(){
     equal(yield db.users.where('username').startsWith('aper').count(), 0, "0 users! Good, means that inner transaction did not commit");
 });
 
+spawnedTest("Issue #1280 - add() with auto-incrementing ID and CryptoKey", function* () {
+    if (!self?.crypto?.subtle) {
+        ok(true, "This browser doesnt have WebCrypto");
+        return;
+    }
+    var generatedKey = yield self.crypto.subtle.generateKey(
+        {
+            name: "RSA-OAEP",
+            modulusLength: 1024,
+            publicExponent: new Uint8Array([1, 0, 1]),
+            hash: "SHA-256",
+        },
+        true,
+        ["encrypt", "decrypt"],
+    );
+
+    yield Dexie.delete("MyDatabaseToStoreCryptoKeys");
+    var db = new Dexie("MyDatabaseToStoreCryptoKeys");
+    db.version(1).stores({
+        keys: "++id",
+    });
+    var objToAdd = { key: generatedKey.privateKey };
+    ok(generatedKey.privateKey instanceof CryptoKey, "The CryptoKey object was generated correctly");
+
+    var id = yield db.keys.add(objToAdd);
+    ok(id != null, "The id we got was not nullish");
+
+    var storedObj = yield db.keys.get(id);
+    ok(storedObj.key instanceof CryptoKey, "The CryptoKey object exists in storage");
+
+    // Verify that update works
+    yield db.keys.update(id, {someOtherProp: 'x'});
+    storedObj = yield db.keys.get(id);
+    ok(storedObj.key instanceof CryptoKey, "The CryptoKey object is still a CryptoKey");
+});
+
 spawnedTest("bulkPut", function*(){
     var highestKey = yield db.users.add({username: "fsdkljfd", email: ["fjkljslk"]});
     ok(true, "Highest key was: " + highestKey);
@@ -934,4 +978,24 @@ promisedTest("bulkGet()", async () => {
     ok(u2 === undefined, "Second objects -''-");
     ok(u3 && u3.first === 'Foo100', "Third should be Foo100");
     ok(u4 === undefined, "Forth should be undefined");
+});
+
+promisedTest("bulkError by pos", async () => {
+  try {
+    const ids = await db.users.bulkAdd([
+      { first: "foo1", last: "bar1", username: "foobar" },
+      { first: "foo2", last: "bar2", username: "foobar" }, // should fail because username is unique idx
+      { first: "foo3", last: "bar3", username: "foobar3" },
+    ]);
+    ok(false, "Should not succeed");
+  } catch (bulkError) {
+    ok(bulkError instanceof Dexie.BulkError, "Got BulkError");
+    equal(bulkError.failures.length, 1, "Got one failure");
+    ok(!!bulkError.failures[0], "failures[0] is one Error");
+    ok(bulkError.failures[1] === undefined, "failures[1] is undefined");
+    equal(Object.keys(bulkError.failuresByPos).length, 1, "Got one key in failuresByPos");
+    equal(Object.keys(bulkError.failuresByPos)[0], 1, "Failure in position 1");
+    ok(bulkError.failuresByPos[0] === undefined, "failuresByPos[0] is undefined");
+    ok(!!bulkError.failuresByPos[1], "failuresByPos[1] is one Error");
+  }
 });

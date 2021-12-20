@@ -1,6 +1,7 @@
 language: node_js
+before_install: if [[ `npm -v` != 7* ]]; then npm i -g npm@7; fi
 addons:
-  firefox: "82.0"
+  firefox: "85.0"
 node_js:
   - "12"
 matrix:
@@ -14,6 +15,7 @@ env:
   - TF=addons/Dexie.Syncable/test/unit
   - TF=addons/Dexie.Syncable/test/integration
   - TF=addons/dexie-export-import/test
+  - TF=libs/dexie-react-hooks/test
   - TF=test/integrations/test-dexie-relationships
 branches:
   only:
@@ -25,3 +27,4 @@ script:
   - cd $TF
   - pwd
   - bash ./travis.sh
+

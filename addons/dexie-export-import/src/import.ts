@@ -1,6 +1,6 @@
 import Dexie from 'dexie';
 import { extractDbSchema } from './helpers';
-import { DexieExportJsonStructure, VERSION } from './json-structure';
+import { DexieExportJsonMeta, DexieExportJsonStructure, VERSION } from './json-structure';
 import { TSON } from './tson';
 import { JsonStream } from './json-stream';
 
@@ -45,6 +45,19 @@ export async function importDB(exportedData: Blob | JsonStream<DexieExportJsonSt
   return db;
 }
 
+export async function peakImportFile(exportedData: Blob): Promise<DexieExportJsonMeta> {
+  const stream = JsonStream<DexieExportJsonStructure>(exportedData);
+  while (!stream.eof()) {
+    await stream.pullAsync(5 * 1024); // 5 k is normally enough for the headers. If not, it will just do another go.
+    if (stream.result.data && stream.result.data!.data) {
+      // @ts-ignore - TS won't allow us to delete a required property - but we are going to cast it.
+      delete stream.result.data.data; // Don't return half-baked data array.
+      break;
+    }
+  }
+  return stream.result as DexieExportJsonMeta;
+}
+
 export async function importInto(db: Dexie, exportedData: Blob | JsonStream<DexieExportJsonStructure>, options?: ImportOptions): Promise<void> {
   options = options || {}; // All booleans defaults to false.
   const CHUNK_SIZE = options!.chunkSizeBytes || (DEFAULT_KILOBYTES_PER_CHUNK * 1024);
@@ -72,6 +85,12 @@ export async function importInto(db: Dexie, exportedData: Blob | JsonStream<Dexi
   if (progressCallback) {
     // Keep ongoing transaction private
     Dexie.ignoreTransaction(()=>progressCallback(progress));
+  }
+
+  if (options!.clearTablesBeforeImport) {
+    for (const table of db.tables) {
+      await table.clear();
+    }
   }
 
   if (options.noTransaction) {
@@ -128,9 +147,6 @@ export async function importInto(db: Dexie, exportedData: Blob | JsonStream<Dexi
           [undefined, filteredRows] :
           [filteredRows.map(row=>row[0]), rows.map(row=>row[1])];
 
-        if (options!.clearTablesBeforeImport) {
-          await table.clear();
-        }
         if (options!.overwriteValues)
           await table.bulkPut(values, keys);
         else

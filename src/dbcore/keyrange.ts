@@ -4,7 +4,7 @@ export const AnyRange: DBCoreKeyRange = {
   type: DBCoreRangeType.Any,
   lower: -Infinity,
   lowerOpen: false,
-  upper: [[]], // BUGBUG: depends on indexeddb impl.
+  upper: [[]],
   upperOpen: false
 }
 

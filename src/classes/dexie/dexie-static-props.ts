@@ -1,8 +1,10 @@
 import { Dexie as _Dexie } from './dexie';
-import { props, derive, extend, override, getByKeyPath, setByKeyPath, delByKeyPath, shallowClone, deepClone, getObjectDiff, asap, _global } from '../../functions/utils';
+import { _global } from '../../globals/global';
+import { props, derive, extend, override, getByKeyPath, setByKeyPath, delByKeyPath, shallowClone, deepClone, asap } from '../../functions/utils';
+import { getObjectDiff } from "../../functions/get-object-diff";
 import { fullNameExceptions } from '../../errors';
 import { DexieConstructor } from '../../public/types/dexie-constructor';
-import { DatabaseEnumerator, databaseEnumerator } from '../../helpers/database-enumerator';
+import { getDatabaseNames } from '../../helpers/database-enumerator';
 import { PSD } from '../../helpers/promise';
 import { usePSD } from '../../helpers/promise';
 import { newScope } from '../../helpers/promise';
@@ -16,6 +18,11 @@ import { exceptions } from '../../errors';
 import { errnames } from '../../errors';
 import { getMaxKey } from '../../functions/quirks';
 import { vip } from './vip';
+import { globalEvents } from '../../globals/global-events';
+import { liveQuery } from '../../live-query/live-query';
+import { extendObservabilitySet } from '../../live-query/extend-observability-set';
+import { domDeps } from './dexie-dom-dependencies';
+import { cmp } from '../../functions/cmp';
 
 /* (Dexie) is an instance of DexieConstructor, as defined in public/types/dexie-constructor.d.ts
 *  (new Dexie()) is an instance of Dexie, as defined in public/types/dexie.d.ts
@@ -43,7 +50,7 @@ props(Dexie, {
   // Static delete() method.
   //
   delete(databaseName: string) {
-    const db = new Dexie(databaseName);
+    const db = new Dexie(databaseName, {addons: []});
     return db.delete();
   },
 
@@ -61,9 +68,11 @@ props(Dexie, {
   // Static method for retrieving a list of all existing databases at current host.
   //
   getDatabaseNames(cb) {
-    return databaseEnumerator ?
-      databaseEnumerator.getDatabaseNames().then(cb) :
-      Promise.resolve([]);
+    try {
+      return getDatabaseNames(Dexie.dependencies).then(cb);
+    } catch {
+      return rejection(new exceptions.MissingAPI());
+    }
   },
 
   /** @deprecated */
@@ -168,6 +177,9 @@ props(Dexie, {
   override: override, // Deprecate?
   // Export our Events() function - can be handy as a toolkit
   Events: Events,
+  on: globalEvents,
+  liveQuery,
+  extendObservabilitySet,
   // Utilities
   getByKeyPath: getByKeyPath,
   setByKeyPath: setByKeyPath,
@@ -175,6 +187,7 @@ props(Dexie, {
   shallowClone: shallowClone,
   deepClone: deepClone,
   getObjectDiff: getObjectDiff,
+  cmp,
   asap: asap,
   //maxKey: new Dexie('',{addons:[]})._maxKey,
   minKey: minKey,
@@ -198,17 +211,7 @@ props(Dexie, {
   // In node.js, however, these properties must be set "manually" before instansiating a new Dexie().
   // For node.js, you need to require indexeddb-js or similar and then set these deps.
   //
-  dependencies: (()=>{
-    try {
-      return {
-        // Required:
-        indexedDB: _global.indexedDB || _global.mozIndexedDB || _global.webkitIndexedDB || _global.msIndexedDB,
-        IDBKeyRange: _global.IDBKeyRange || _global.webkitIDBKeyRange
-      };
-    } catch (e) {
-      return {indexedDB: null, IDBKeyRange: null};
-    }
-  })(),
+  dependencies: domDeps,
 
   // API Version Number: Type Number, make sure to always set a version number that can be comparable correctly. Example: 0.9, 0.91, 0.92, 1.0, 1.01, 1.1, 1.2, 1.21, etc.
   semVer: DEXIE_VERSION,

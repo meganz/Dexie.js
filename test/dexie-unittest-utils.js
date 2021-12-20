@@ -126,6 +126,7 @@ export function deleteDatabase(db) {
 
 export const isIE = !(window.ActiveXObject) && "ActiveXObject" in window;
 export const isEdge = /Edge\/\d+/.test(navigator.userAgent);
+export const isChrome = !!window.chrome;
 var hasPolyfillIE = [].slice.call(document.getElementsByTagName("script")).some(
     s => s.src.indexOf("idb-iegap") !== -1);
 

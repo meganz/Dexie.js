@@ -1,6 +1,8 @@
 ﻿import Dexie from 'dexie';
 Dexie.test = true; // Improve code coverage
+import "./tests-cmp.js";
 import "./tests-table.js";
+import "./tests-chrome-transaction-durability.js";
 import "./tests-collection.js";
 import "./tests-whereclause.js";
 import "./tests-transaction.js";
@@ -15,4 +17,6 @@ import "./tests-extendability.js";
 import "./tests-crud-hooks";
 import "./tests-blobs";
 import "./tests-binarykeys";
+import "./tests-live-query";
+import "./tests-rangeset";
 //import "./tests-performance.js"; Not required. Should make other performance tests separately instead.

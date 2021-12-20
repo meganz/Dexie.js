@@ -7,11 +7,12 @@ import Promise, { wrap } from '../../helpers/promise';
 import { connections } from '../../globals/constants';
 import { runUpgraders, readGlobalSchema, adjustToExistingIndexNames, verifyInstalledSchema } from '../version/schema-helpers';
 import { safariMultiStoreFix } from '../../functions/quirks';
-import { databaseEnumerator } from '../../helpers/database-enumerator';
+import { _onDatabaseCreated } from '../../helpers/database-enumerator';
 import { vip } from './vip';
 import { promisableChain, nop } from '../../functions/chaining-functions';
 import { generateMiddlewareStacks } from './generate-middleware-stacks';
 import { slice } from '../../functions/utils';
+import safari14Workaround from 'safari-14-idb-fix';
 
 export function dexieOpen (db: Dexie) {
   const state = db._state;
@@ -24,28 +25,36 @@ export function dexieOpen (db: Dexie) {
   state.isBeingOpened = true;
   state.dbOpenError = null;
   state.openComplete = false;
+  const openCanceller = state.openCanceller;
+
+  function throwIfCancelled() {
+    // If state.openCanceller object reference is replaced, it means db.close() has been called,
+    // meaning this open flow should be cancelled.
+    if (state.openCanceller !== openCanceller) throw new exceptions.DatabaseClosed('db.open() was cancelled');
+  }
   
   // Function pointers to call when the core opening process completes.
   let resolveDbReady = state.dbReadyResolve,
       // upgradeTransaction to abort on failure.
-      upgradeTransaction: (IDBTransaction | null) = null;
+      upgradeTransaction: (IDBTransaction | null) = null,
+      wasCreated = false;
   
-  return Promise.race([state.openCanceller, new Promise((resolve, reject) => {
+  // safari14Workaround = Workaround by jakearchibald for new nasty bug in safari 14.
+  return Promise.race([openCanceller, (typeof navigator === 'undefined' ? Promise.resolve() : safari14Workaround()).then(() => new Promise((resolve, reject) => {
       // Multiply db.verno with 10 will be needed to workaround upgrading bug in IE:
       // IE fails when deleting objectStore after reading from it.
       // A future version of Dexie.js will stopover an intermediate version to workaround this.
       // At that point, we want to be backward compatible. Could have been multiplied with 2, but by using 10, it is easier to map the number to the real version number.
       
+      throwIfCancelled();
       // If no API, throw!
-      if (!indexedDB) throw new exceptions.MissingAPI(
-          "indexedDB API not found. If using IE10+, make sure to run your code on a server URL "+
-          "(not locally). If using old Safari versions, make sure to include indexedDB polyfill.");
+      if (!indexedDB) throw new exceptions.MissingAPI();
       const dbName = db.name;
       
       const req = state.autoSchema ?
         indexedDB.open(dbName) :
         indexedDB.open(dbName, Math.round(db.verno * 10));
-      if (!req) throw new exceptions.MissingAPI("IndexedDB API not available"); // May happen in Safari private mode, see https://github.com/dfahlander/Dexie.js/issues/134
+      if (!req) throw new exceptions.MissingAPI(); // May happen in Safari private mode, see https://github.com/dfahlander/Dexie.js/issues/134
       req.onerror = eventRejectHandler(reject);
       req.onblocked = wrap(db._fireOnBlocked);
       req.onupgradeneeded = wrap (e => {
@@ -65,7 +74,8 @@ export function dexieOpen (db: Dexie) {
           } else {
               upgradeTransaction.onerror = eventRejectHandler(reject);
               var oldVer = e.oldVersion > Math.pow(2, 62) ? 0 : e.oldVersion; // Safari 8 fix.
-              db.idbdb = req.result;
+              wasCreated = oldVer < 1;
+              db._novip.idbdb = req.result;// db._novip is because db can be an Object.create(origDb).
               runUpgraders(db, oldVer / 10, upgradeTransaction, reject);
           }
       }, reject);
@@ -73,7 +83,7 @@ export function dexieOpen (db: Dexie) {
       req.onsuccess = wrap (() => {
           // Core opening procedure complete. Now let's just record some stuff.
           upgradeTransaction = null;
-          const idbdb = db.idbdb = req.result;
+          const idbdb = db._novip.idbdb = req.result; // db._novip is because db can be an Object.create(origDb).
 
           const objectStoreNames = slice(idbdb.objectStoreNames);
           if (objectStoreNames.length > 0) try {
@@ -102,41 +112,48 @@ export function dexieOpen (db: Dexie) {
               db.on("versionchange").fire(ev);
           });
           
-          databaseEnumerator.add(dbName);
+          idbdb.onclose = wrap(ev => {
+              db.on("close").fire(ev);
+          });
+
+          if (wasCreated) _onDatabaseCreated(db._deps, dbName);
 
           resolve();
 
       }, reject);
-  })]).then(() => {
+  }))]).then(() => {
       // Before finally resolving the dbReadyPromise and this promise,
       // call and await all on('ready') subscribers:
       // Dexie.vip() makes subscribers able to use the database while being opened.
       // This is a must since these subscribers take part of the opening procedure.
+      throwIfCancelled();
       state.onReadyBeingFired = [];
-      return Promise.resolve(vip(db.on.ready.fire)).then(function fireRemainders() {
+      return Promise.resolve(vip(()=>db.on.ready.fire(db.vip))).then(function fireRemainders() {
           if (state.onReadyBeingFired.length > 0) {
               // In case additional subscribers to db.on('ready') were added during the time db.on.ready.fire was executed.
               let remainders = state.onReadyBeingFired.reduce(promisableChain, nop);
               state.onReadyBeingFired = [];
-              return Promise.resolve(vip(remainders)).then(fireRemainders)
+              return Promise.resolve(vip(()=>remainders(db.vip))).then(fireRemainders)
           }
       });
   }).finally(()=>{
       state.onReadyBeingFired = null;
+      state.isBeingOpened = false;
   }).then(()=>{
       // Resolve the db.open() with the db instance.
-      state.isBeingOpened = false;
       return db;
   }).catch(err => {
-      try {
-          // Did we fail within onupgradeneeded? Make sure to abort the upgrade transaction so it doesnt commit.
-          upgradeTransaction && upgradeTransaction.abort();
-      } catch (e) { }
-      state.isBeingOpened = false; // Set before calling db.close() so that it doesnt reject openCanceller again (leads to unhandled rejection event).
-      db.close(); // Closes and resets idbdb, removes connections, resets dbReadyPromise and openCanceller so that a later db.open() is fresh.
-      // A call to db.close() may have made on-ready subscribers fail. Use dbOpenError if set, since err could be a follow-up error on that.
       state.dbOpenError = err; // Record the error. It will be used to reject further promises of db operations.
-      return rejection (state.dbOpenError);
+      try {
+        // Did we fail within onupgradeneeded? Make sure to abort the upgrade transaction so it doesnt commit.
+        upgradeTransaction && upgradeTransaction.abort();
+      } catch { }
+      if (openCanceller === state.openCanceller) {
+        // Still in the same open flow - The error reason was not due to external call to db.close().
+        // Make sure to call db.close() to finalize resources.
+        db._close(); // Closes and resets idbdb, removes connections, resets dbReadyPromise and openCanceller so that a later db.open() is fresh.
+      }
+      return rejection (err);
   }).finally(()=>{
       state.openComplete = true;
       resolveDbReady(); // dbReadyPromise is resolved no matter if open() rejects or resolved. It's just to wake up waiters.

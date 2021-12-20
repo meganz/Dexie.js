@@ -1,5 +1,7 @@
 // For public interface
 
+import {ChromeTransactionDurability} from "./dexie-constructor";
+
 export const enum DBCoreRangeType {
   Equal = 1,
   Range = 2,
@@ -20,9 +22,8 @@ export interface DBCoreTransaction {
   abort(): void;
 }
 
-export interface DBCoreTransactionRequest {
-  tables: string[];
-  mode: 'readonly' | 'readwrite';
+interface DbCoreTransactionOptions {
+  durability: ChromeTransactionDurability
 }
 
 export type DBCoreMutateRequest = DBCoreAddRequest | DBCorePutRequest | DBCoreDeleteRequest | DBCoreDeleteRangeRequest;
@@ -31,7 +32,7 @@ export interface DBCoreMutateResponse {
   numFailures: number,
   failures: {[operationNumber: number]: Error};
   lastResult: any;
-  results?: any[]; // Present on AddRequest and PutRequest if request.wantResults is truthy.
+  results?: any[]; // Present on AddRequest and PutRequest.
 }
 
 export interface DBCoreAddRequest {
@@ -39,6 +40,7 @@ export interface DBCoreAddRequest {
   trans: DBCoreTransaction;
   values: any[];
   keys?: any[];
+  /** @deprecated Will always get results since 3.1.0-alpha.5 */
   wantResults?: boolean;
 }
 
@@ -47,6 +49,13 @@ export interface DBCorePutRequest {
   trans: DBCoreTransaction;
   values: any[];
   keys?: any[];
+  criteria?: {
+    index: string | null;
+    range: DBCoreKeyRange;
+  };
+  changeSpec?: {[keyPath: string]: any}; // Common changeSpec for each key
+  changeSpecs?: {[keyPath: string]: any}[]; // changeSpec per key. 
+  /** @deprecated Will always get results since 3.1.0-alpha.5 */
   wantResults?: boolean;
 }
 
@@ -54,6 +63,10 @@ export interface DBCoreDeleteRequest {
   type: 'delete';
   trans: DBCoreTransaction;
   keys: any[];
+  criteria?: {
+    index: string | null;
+    range: DBCoreKeyRange;
+  };
 }
 
 export interface DBCoreDeleteRangeRequest {
@@ -65,6 +78,7 @@ export interface DBCoreDeleteRangeRequest {
 export interface DBCoreGetManyRequest {
   trans: DBCoreTransaction;
   keys: any[];
+  cache?: "immutable" | "clone"
 }
 
 export interface DBCoreGetRequest {
@@ -144,17 +158,15 @@ export interface DBCoreIndex {
   readonly unique?: boolean;
   /** Whether index is multiEntry. */
   readonly multiEntry?: boolean;
-  /** Extract (using keyPath) a key from given value (object) */
-  readonly extractKey: (value: any) => any;
+  /** Extract (using keyPath) a key from given value (object). Null for outbound primary keys */
+  readonly extractKey: ((value: any) => any) | null;
 }
-
 export interface DBCore {
   stack: "dbcore";
   // Transaction and Object Store
-  transaction(req: DBCoreTransactionRequest): DBCoreTransaction;
+  transaction(stores: string[], mode: 'readonly' | 'readwrite', options?: DbCoreTransactionOptions): DBCoreTransaction;
 
   // Utility methods
-  cmp(a: any, b: any) : number;
   readonly MIN_KEY: any;
   readonly MAX_KEY: any;
   readonly schema: DBCoreSchema;

@@ -55,7 +55,6 @@ export function createVirtualIndexMiddleware (down: DBCore) : DBCore {
         const virtualIndex = {
           ...lowLevelIndex,
           isVirtual,
-          isPrimaryKey: !isVirtual && lowLevelIndex.isPrimaryKey,
           keyTail,
           keyLength,
           extractKey: getKeyExtractor(keyPath),
@@ -137,7 +136,12 @@ export function createVirtualIndexMiddleware (down: DBCore) : DBCore {
               key != null ?
                 cursor.continue(pad(key, req.reverse ? down.MAX_KEY : down.MIN_KEY, keyTail)) :
                 req.unique ?
-                  cursor.continue(pad(cursor.key, req.reverse ? down.MIN_KEY : down.MAX_KEY, keyTail)) :
+                  cursor.continue(
+                    cursor.key.slice(0, keyLength)
+                      .concat(req.reverse
+                        ? down.MIN_KEY
+                        : down.MAX_KEY, keyTail)
+                  ) :
                   cursor.continue()
             }
             const virtualCursor = Object.create(cursor, {
@@ -145,6 +149,11 @@ export function createVirtualIndexMiddleware (down: DBCore) : DBCore {
               continuePrimaryKey: {
                 value(key: any, primaryKey: any) {
                   cursor.continuePrimaryKey(pad(key, down.MAX_KEY, keyTail), primaryKey);
+                }
+              },
+              primaryKey: {
+                get() {
+                  return cursor.primaryKey;
                 }
               },
               key: {

@@ -7,13 +7,14 @@ import {
   DBCorePutRequest,
   DBCoreDeleteRequest,
   DBCoreTransaction,
-  DBCoreKeyRange,
+  DBCoreKeyRange
 } from "../public/types/dbcore";
 import { nop } from '../functions/chaining-functions';
-import { getObjectDiff, hasOwn, setByKeyPath } from '../functions/utils';
+import { hasOwn, setByKeyPath } from '../functions/utils';
+import { getObjectDiff } from "../functions/get-object-diff";
 import { PSD } from '../helpers/promise';
 //import { LockableTableMiddleware } from '../dbcore/lockable-table-middleware';
-import { getEffectiveKeys, getExistingValues } from '../dbcore/get-effective-keys';
+import { getEffectiveKeys } from '../dbcore/get-effective-keys';
 import { Middleware } from '../public/types/middleware';
 import { Transaction } from '../classes/transaction';
 
@@ -58,7 +59,7 @@ export const hooksMiddleware: Middleware<DBCore>  = {
             if (!keys) throw new Error("Keys missing");
             // Clone Request and set keys arg
             req = req.type === 'add' || req.type === 'put' ?
-              {...req, keys, wantResults: true} : // Tell lower layer to deliver results. Hooks onsuccess needs it.
+              {...req, keys} :
               {...req};
             if (req.type !== 'delete') req.values = [...req.values];
             if (req.keys) req.keys = [...req.keys];
@@ -149,3 +150,13 @@ export const hooksMiddleware: Middleware<DBCore>  = {
     },
   }) as DBCore
 };
+
+function getExistingValues(
+  table: DBCoreTable,
+  req: DBCoreAddRequest | DBCorePutRequest | DBCoreDeleteRequest,
+  effectiveKeys: any[]
+) {
+  return req.type === "add"
+    ? Promise.resolve([])
+    : table.getMany({ trans: req.trans, keys: effectiveKeys, cache: "immutable" });
+}

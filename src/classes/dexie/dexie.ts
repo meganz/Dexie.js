@@ -31,7 +31,7 @@ import { exceptions } from '../../errors';
 import { lowerVersionFirst } from '../version/schema-helpers';
 import { dexieOpen } from './dexie-open';
 import { wrap } from '../../helpers/promise';
-import { databaseEnumerator } from '../../helpers/database-enumerator';
+import { _onDatabaseDeleted } from '../../helpers/database-enumerator';
 import { eventRejectHandler } from '../../functions/event-wrappers';
 import { extractTransactionArgs, enterTransactionScope } from './transaction-helpers';
 import { TransactionMode } from '../../public/types/transaction-mode';
@@ -42,6 +42,8 @@ import { Middleware, DexieStacks } from '../../public/types/middleware';
 import { virtualIndexMiddleware } from '../../dbcore/virtual-index-middleware';
 import { hooksMiddleware } from '../../hooks/hooks-middleware';
 import { IndexableType } from '../../public';
+import { observabilityMiddleware } from '../../live-query/observability-middleware';
+import { cacheExistingValuesMiddleware } from '../../dbcore/cache-existing-values-middleware';
 
 export interface DbReadyState {
   dbOpenError: any;
@@ -69,11 +71,14 @@ export class Dexie implements IDexie {
   _maxKey: IndexableType;
   _fireOnBlocked: (ev: Event) => void;
   _middlewares: {[StackName in keyof DexieStacks]?: Middleware<DexieStacks[StackName]>[]} = {};
+  _vip?: boolean;
+  _novip?: Dexie;// db._novip is to escape to orig db from db.vip.
   core: DBCore;
 
   name: string;
   verno: number = 0;
   idbdb: IDBDatabase | null;
+  vip: Dexie;
   on: DbEvents;
 
   Table: TableConstructor;
@@ -105,6 +110,7 @@ export class Dexie implements IDexie {
     this._storeNames = [];
     this._allTables = {};
     this.idbdb = null;
+    this._novip = this;
     const state: DbReadyState = {
       dbOpenError: null,
       isBeingOpened: false,
@@ -124,7 +130,7 @@ export class Dexie implements IDexie {
     });
     this._state = state;
     this.name = name;
-    this.on = Events(this, "populate", "blocked", "versionchange", { ready: [promisableChain, nop] }) as DbEvents;
+    this.on = Events(this, "populate", "blocked", "versionchange", "close", { ready: [promisableChain, nop] }) as DbEvents;
     this.on.ready.subscribe = override(this.on.ready.subscribe, subscribe => {
       return (subscriber, bSticky) => {
         (Dexie as any as DexieConstructor).vip(() => {
@@ -192,7 +198,7 @@ export class Dexie implements IDexie {
       mode: IDBTransactionMode,
       storeNames: string[],
       dbschema: DbSchema,
-      parentTransaction?: Transaction) => new this.Transaction(mode, storeNames, dbschema, parentTransaction);
+      parentTransaction?: Transaction) => new this.Transaction(mode, storeNames, dbschema, this._options.chromeTransactionDurability, parentTransaction);
 
     this._fireOnBlocked = ev => {
       this.on("blocked").fire(ev);
@@ -205,6 +211,10 @@ export class Dexie implements IDexie {
     // Default middlewares:
     this.use(virtualIndexMiddleware);
     this.use(hooksMiddleware);
+    this.use(observabilityMiddleware);
+    this.use(cacheExistingValuesMiddleware);
+
+    this.vip = Object.create(this, {_vip: {value: true}}) as Dexie;
 
     // Call each addon:
     addons.forEach(addon => addon(this));
@@ -230,7 +240,12 @@ export class Dexie implements IDexie {
   }
 
   _whenReady<T>(fn: () => Promise<T>): Promise<T> {
-    return this._state.openComplete || PSD.letThrough ? fn() : new Promise<T>((resolve, reject) => {
+    return (this.idbdb && (this._state.openComplete || PSD.letThrough || this._vip)) ? fn() : new Promise<T>((resolve, reject) => {
+      if (this._state.openComplete) {
+        // idbdb is falsy but openComplete is true. Must have been an exception durin open.
+        // Don't wait for openComplete as it would lead to infinite loop.
+        return reject(new exceptions.DatabaseClosed(this._state.dbOpenError));
+      }
       if (!this._state.isBeingOpened) {
         if (!this._options.autoOpen) {
           reject(new exceptions.DatabaseClosed());
@@ -268,19 +283,14 @@ export class Dexie implements IDexie {
     return dexieOpen(this);
   }
 
-  close(): void {
-    const idx = connections.indexOf(this),
-      state = this._state;
+  _close(): void {
+    const state = this._state;
+    const idx = connections.indexOf(this);
     if (idx >= 0) connections.splice(idx, 1);
     if (this.idbdb) {
       try { this.idbdb.close(); } catch (e) { }
-      this.idbdb = null;
-    }
-    this._options.autoOpen = false;
-    state.dbOpenError = new exceptions.DatabaseClosed();
-    if (state.isBeingOpened)
-      state.cancelOpen(state.dbOpenError);
-
+      this._novip.idbdb = null; // db._novip is because db can be an Object.create(origDb).
+    }    
     // Reset dbReadyPromise promise:
     state.dbReadyPromise = new Promise(resolve => {
       state.dbReadyResolve = resolve;
@@ -288,6 +298,15 @@ export class Dexie implements IDexie {
     state.openCanceller = new Promise((_, reject) => {
       state.cancelOpen = reject;
     });
+  }
+
+  close(): void {
+    this._close();
+    const state = this._state;
+    this._options.autoOpen = false;
+    state.dbOpenError = new exceptions.DatabaseClosed();
+    if (state.isBeingOpened)
+      state.cancelOpen(state.dbOpenError);
   }
 
   delete(): Promise<void> {
@@ -298,7 +317,7 @@ export class Dexie implements IDexie {
         this.close();
         var req = this._deps.indexedDB.deleteDatabase(this.name);
         req.onsuccess = wrap(() => {
-          databaseEnumerator.remove(this.name);
+          _onDatabaseDeleted(this._deps, this.name);
           resolve();
         });
         req.onerror = eventRejectHandler(reject);

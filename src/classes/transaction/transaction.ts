@@ -10,6 +10,7 @@ import { preventDefault } from '../../functions/event-wrappers';
 import { newScope } from '../../helpers/promise';
 import * as Debug from '../../helpers/debug';
 import { Table } from '../table';
+import { globalEvents } from '../../globals/global-events';
 
 /** Transaction
  * 
@@ -20,6 +21,7 @@ export class Transaction implements ITransaction {
   db: Dexie;
   active: boolean;
   mode: IDBTransactionMode;
+  chromeTransactionDurability: ChromeTransactionDurability;
   idbtrans: IDBTransaction;
   storeNames: string[];
   on: any;
@@ -112,7 +114,12 @@ export class Transaction implements ITransaction {
     if (!this.active) throw new exceptions.TransactionInactive();
     assert(this._completion._state === null); // Completion Promise must still be pending.
 
-    idbtrans = this.idbtrans = idbtrans || idbdb.transaction(safariMultiStoreFix(this.storeNames), this.mode) as IDBTransaction;
+    idbtrans = this.idbtrans = idbtrans ||
+      (this.db.core 
+        ? this.db.core.transaction(this.storeNames, this.mode as 'readwrite' | 'readonly', { durability: this.chromeTransactionDurability })
+        : idbdb.transaction(this.storeNames, this.mode, { durability: this.chromeTransactionDurability })
+      ) as IDBTransaction;
+
     idbtrans.onerror = wrap(ev => {
       preventDefault(ev);// Prohibit default bubbling to window.error
       this._reject(idbtrans.error);
@@ -126,6 +133,9 @@ export class Transaction implements ITransaction {
     idbtrans.oncomplete = wrap(() => {
       this.active = false;
       this._resolve();
+      if ('mutatedParts' in idbtrans) {
+        globalEvents.storagemutated.fire(idbtrans["mutatedParts"]);
+      }
     });
     return this;
   }
@@ -228,8 +238,11 @@ export class Transaction implements ITransaction {
    * http://dexie.org/docs/Transaction/Transaction.abort()
    */
   abort() {
-    this.active && this._reject(new exceptions.Abort());
-    this.active = false;
+    if (this.active) {
+      this.active = false;
+      if (this.idbtrans) this.idbtrans.abort();
+      this._reject(new exceptions.Abort());
+    }
   }
 
   /** Transaction.table()

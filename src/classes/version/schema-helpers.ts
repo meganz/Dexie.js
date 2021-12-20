@@ -1,6 +1,7 @@
 import { Dexie } from '../dexie';
 import { DbSchema } from '../../public/types/db-schema';
-import { setProp, keys, slice, _global, isArray, shallowClone, isAsyncFunction, defineProperty, getPropertyDescriptor } from '../../functions/utils';
+import { _global } from "../../globals/global";
+import { setProp, keys, slice, isArray, shallowClone, isAsyncFunction, defineProperty, getPropertyDescriptor } from '../../functions/utils';
 import { Transaction } from '../transaction';
 import { Version } from './version';
 import Promise, { PSD, newScope, NativePromise, decrementExpectedAwaits, incrementExpectedAwaits } from '../../helpers/promise';
@@ -13,7 +14,7 @@ import { createIndexSpec, nameFromKeyPath } from '../../helpers/index-spec';
 import { createTableSchema } from '../../helpers/table-schema';
 import { generateMiddlewareStacks } from '../dexie/generate-middleware-stacks';
 
-export function setApiOnPlace(db: Dexie, objs: Object[], tableNames: string[], dbschema: DbSchema) {
+export function setApiOnPlace({_novip: db}: Dexie, objs: Object[], tableNames: string[], dbschema: DbSchema) {
   tableNames.forEach(tableName => {
     const schema = dbschema[tableName];
     objs.forEach(obj => {
@@ -40,7 +41,7 @@ export function setApiOnPlace(db: Dexie, objs: Object[], tableNames: string[], d
   });
 }
 
-export function removeTablesApi(db: Dexie, objs: Object[]) {
+export function removeTablesApi({_novip: db}: Dexie, objs: Object[]) {
   objs.forEach(obj => {
     for (let key in obj) {
       if (obj[key] instanceof db.Table) delete obj[key];
@@ -77,7 +78,7 @@ export function runUpgraders(db: Dexie, oldVersion: number, idbUpgradeTrans: IDB
 export type UpgradeQueueItem = (idbtrans: IDBTransaction) => PromiseLike<any> | void;
 
 export function updateTablesAndIndexes(
-  db: Dexie,
+  {_novip: db}: Dexie,
   oldVersion: number,
   trans: Transaction,
   idbUpgradeTrans: IDBTransaction)
@@ -291,12 +292,8 @@ export function createMissingTables(newSchema: DbSchema, idbtrans: IDBTransactio
 }
 
 export function deleteRemovedTables(newSchema: DbSchema, idbtrans: IDBTransaction) {
-  for (var i = 0; i < idbtrans.db.objectStoreNames.length; ++i) {
-    var storeName = idbtrans.db.objectStoreNames[i];
-    if (newSchema[storeName] == null) {
-      idbtrans.db.deleteObjectStore(storeName);
-    }
-  }
+  [].slice.call(idbtrans.db.objectStoreNames).forEach(storeName =>
+    newSchema[storeName] == null && idbtrans.db.deleteObjectStore(storeName));
 }
 
 export function addIndex(store: IDBObjectStore, idx: IndexSpec) {
@@ -342,7 +339,7 @@ function buildGlobalSchema(
   return globalSchema;
 }
 
-export function readGlobalSchema(db: Dexie, idbdb: IDBDatabase, tmpTrans: IDBTransaction) {
+export function readGlobalSchema({_novip: db}: Dexie, idbdb: IDBDatabase, tmpTrans: IDBTransaction) {
   db.verno = idbdb.version / 10;
   const globalSchema = db._dbSchema = buildGlobalSchema(db, idbdb, tmpTrans);
   db._storeNames = slice(idbdb.objectStoreNames, 0);
@@ -355,7 +352,7 @@ export function verifyInstalledSchema(db: Dexie, tmpTrans: IDBTransaction): bool
   return !(diff.add.length || diff.change.some(ch => ch.add.length || ch.change.length));
 }
 
-export function adjustToExistingIndexNames(db: Dexie, schema: DbSchema, idbtrans: IDBTransaction) {
+export function adjustToExistingIndexNames({_novip: db}: Dexie, schema: DbSchema, idbtrans: IDBTransaction) {
   // Issue #30 Problem with existing db - adjust to existing index names when migrating from non-dexie db
   const storeNames = idbtrans.db.objectStoreNames;
 

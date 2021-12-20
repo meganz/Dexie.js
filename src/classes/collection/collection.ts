@@ -12,6 +12,7 @@ import { hangsOnDeleteLargeKeyRange } from "../../globals/constants";
 import { ThenShortcut } from "../../public/types/then-shortcut";
 import { Transaction } from '../transaction';
 import { DBCoreCursor, DBCoreTransaction, DBCoreRangeType, DBCoreMutateResponse, DBCoreKeyRange } from '../../public/types/dbcore';
+import { cmp } from "../../functions/cmp";
 
 /** class Collection
  * 
@@ -484,8 +485,7 @@ export class Collection implements ICollection {
 
       const coreTable = ctx.table.core;
       const {outbound, extractKey} = coreTable.schema.primaryKey;
-      const limit = 'testmode' in Dexie ? 1 : 2000;
-      const {cmp} = this.db.core;
+      const limit = this.db._options.modifyChunkSize || 200;
       const totalFailures = [];
       let successCount = 0;
       const failedKeys: IndexableType[] = [];
@@ -500,7 +500,14 @@ export class Collection implements ICollection {
 
         const nextChunk = (offset: number) => {
           const count = Math.min(limit, keys.length - offset);
-          return coreTable.getMany({trans, keys: keys.slice(offset, offset + count)}).then(values => {
+          return coreTable.getMany({
+            trans,
+            keys: keys.slice(offset, offset + count),
+            cache: "immutable" // Optimize for 2 things:
+            // 1) observability-middleware can track changes better.
+            // 2) hooks middleware don't have to query the existing values again when tracking changes.
+            // We can use "immutable" because we promise to not touch the values we retrieve here!
+          }).then(values => {
             const addValues = [];
             const putValues = [];
             const putKeys = outbound ? [] : null;
@@ -526,7 +533,13 @@ export class Collection implements ICollection {
                 }
               }
             }
-            
+            const criteria = isPlainKeyRange(ctx) &&
+              ctx.limit === Infinity &&
+              (typeof changes !== 'function' || changes === deleteCallback) && {
+                index: ctx.index,
+                range: ctx.range
+              };
+
             return Promise.resolve(addValues.length > 0 &&
               coreTable.mutate({trans, type: 'add', values: addValues})
                 .then(res => {
@@ -536,12 +549,23 @@ export class Collection implements ICollection {
                   }
                   applyMutateResult(addValues.length, res);
                 })
-            ).then(res=>putValues.length > 0 &&
-                coreTable.mutate({trans, type: 'put', keys: putKeys, values: putValues})
-                  .then(res=>applyMutateResult(putValues.length, res))
-            ).then(()=>deleteKeys.length > 0 &&
-                coreTable.mutate({trans, type: 'delete', keys: deleteKeys})
-                  .then(res=>applyMutateResult(deleteKeys.length, res))
+            ).then(()=>(putValues.length > 0 || (criteria && typeof changes === 'object')) &&
+                coreTable.mutate({
+                  trans,
+                  type: 'put',
+                  keys: putKeys,
+                  values: putValues,
+                  criteria,
+                  changeSpec: typeof changes !== 'function'
+                    && changes
+                }).then(res=>applyMutateResult(putValues.length, res))
+            ).then(()=>(deleteKeys.length > 0 || (criteria && changes === deleteCallback)) &&
+                coreTable.mutate({
+                  trans,
+                  type: 'delete',
+                  keys: deleteKeys,
+                  criteria
+                }).then(res=>applyMutateResult(deleteKeys.length, res))
             ).then(()=>{
               return keys.length > offset + count && nextChunk(offset + limit);
             });
@@ -592,8 +616,8 @@ export class Collection implements ICollection {
       });
     }
 
-    return this.modify((value, ctx) => ctx.value = null);
+    return this.modify(deleteCallback);
   }
 }
 
-
+const deleteCallback = (value, ctx) => ctx.value = null;
