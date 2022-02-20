@@ -1,9 +1,9 @@
 Dexie.js
 ========
 
-[![NPM Version][npm-image]][npm-url] [![Build Status](https://travis-ci.com/dfahlander/Dexie.js.svg?branch=master)](https://travis-ci.com/dfahlander/Dexie.js)[![Tested with Browserstack](http://dexie.org/assets/images/tested-with-browserstack2.png)](https://www.browserstack.com)
+[![NPM Version][npm-image]][npm-url] [![Build Status](https://travis-ci.com/dfahlander/Dexie.js.svg?branch=master)](https://travis-ci.com/dfahlander/Dexie.js)[![Tested with Browserstack](https://dexie.org/assets/images/tested-with-browserstack2.png)](https://www.browserstack.com)
 
-Dexie.js is a wrapper library for indexedDB - the standard database in the browser. http://dexie.org
+Dexie.js is a wrapper library for indexedDB - the standard database in the browser. https://dexie.org
 
 #### Why?
 Dexie solves three main issues with the native IndexedDB API:
@@ -44,17 +44,48 @@ Dexie provides a neat database API with a well thought-through API design, robus
  </head>
 </html>
 ```
-Yes, it's that simple.
+Yes, it's that simple. 
 
-[Tutorial](http://dexie.org/docs/Tutorial)
+An equivalent modern version (works in all modern browsers):
 
-[API Reference](http://dexie.org/docs/API-Reference)
+```html
+<!doctype html>
+<html>
+ <head>
+  <script type="module">
+   import Dexie from "https://unpkg.com/dexie@latest/dist/modern/dexie.mjs";
+   //
+   // Declare Database
+   //
+   const db = new Dexie("FriendDatabase");
+   db.version(1).stores({
+     friends: "++id,name,age"
+   });
 
-[Samples](http://dexie.org/docs/Samples)
+   //
+   // Manipulate and Query Database
+   //
+   try {
+     await db.friends.add({name: "Josephine", age: 21});
+     const youngFriends = await db.friends.where("age").below(25).toArray();
+     alert (`My young friends: ${JSON.stringify(youngFriends)}`);
+   } catch (e) {
+     alert (`Error: ${e}`);
+   }
+  </script>
+ </head>
+</html>
+```
+
+[Tutorial](https://dexie.org/docs/Tutorial)
+
+[API Reference](https://dexie.org/docs/API-Reference)
+
+[Samples](https://dexie.org/docs/Samples)
 
 ### Performance
 
-Dexie has kick-ass performance. Its [bulk methods](http://dexie.org/docs/Table/Table.bulkPut()) take advantage of a lesser-known feature in IndexedDB that makes it possible to store stuff without listening to every onsuccess event. This speeds up the performance to a maximum.
+Dexie has kick-ass performance. Its [bulk methods](https://dexie.org/docs/Table/Table.bulkPut()) take advantage of a lesser-known feature in IndexedDB that makes it possible to store stuff without listening to every onsuccess event. This speeds up the performance to a maximum.
 
 #### Supported operations
 ```js
@@ -108,42 +139,12 @@ uniqueKeys(): Promise;
 until(filter: (value) => boolean, includeStopEntry?: boolean): Collection;
 update(key: Key, changes: { [keyPath: string]: any }): Promise;
 ```
-This is a mix of methods from [WhereClause](http://dexie.org/docs/WhereClause/WhereClause), [Table](http://dexie.org/docs/Table/Table) and [Collection](http://dexie.org/docs/Collection/Collection). Dive into the [API reference](http://dexie.org/docs/API-Reference) to see the details.
-
-#### Hello World (ES2016 / ES7)
-```js
-import Dexie from 'dexie';
-
-//
-// Declare Database
-//
-const db = new Dexie("FriendDatabase");
-db.version(1).stores({ friends: "++id,name,age" });
-
-db.transaction('rw', db.friends, async() => {
-
-    // Make sure we have something in DB:
-    if ((await db.friends.where({name: 'Josephine'}).count()) === 0) {
-        const id = await db.friends.add({name: "Josephine", age: 21});
-        alert (`Addded friend with id ${id}`);
-    }
-
-    // Query:
-    const youngFriends = await db.friends.where("age").below(25).toArray();
-
-    // Show result:
-    alert ("My young friends: " + JSON.stringify(youngFriends));
-
-}).catch(e => {
-    alert(e.stack || e);
-});
-
-```
+This is a mix of methods from [WhereClause](https://dexie.org/docs/WhereClause/WhereClause), [Table](https://dexie.org/docs/Table/Table) and [Collection](https://dexie.org/docs/Collection/Collection). Dive into the [API reference](https://dexie.org/docs/API-Reference) to see the details.
 
 #### Hello World (Typescript)
 
 ```js
-import Dexie from 'dexie';
+import Dexie, { Table } from 'dexie';
 
 interface Friend {
     id?: number;
@@ -155,14 +156,13 @@ interface Friend {
 // Declare Database
 //
 class FriendDatabase extends Dexie {
-    public friends: Dexie.Table<Friend, number>; // id is number in this case
+    public friends!: Table<Friend, number>; // id is number in this case
 
     public constructor() {
         super("FriendDatabase");
         this.version(1).stores({
             friends: "++id,name,age"
         });
-        this.friends = this.table("friends");
     }
 }
 
@@ -189,17 +189,17 @@ db.transaction('rw', db.friends, async() => {
 
 Samples
 -------
-http://dexie.org/docs/Samples
+https://dexie.org/docs/Samples
 
 https://github.com/dfahlander/Dexie.js/tree/master/samples
 
 Knowledge Base
 -----
-[http://dexie.org/docs/Questions-and-Answers](http://dexie.org/docs/Questions-and-Answers)
+[https://dexie.org/docs/Questions-and-Answers](https://dexie.org/docs/Questions-and-Answers)
 
 Website
 -------
-[http://dexie.org](http://dexie.org)
+[https://dexie.org](https://dexie.org)
 
 Install over npm
 ----------------
@@ -212,11 +212,19 @@ Download
 --------
 For those who don't like package managers, here's the download links:
 
-https://unpkg.com/dexie@latest/dist/dexie.js
+### Legacy:
+https://unpkg.com/dexie@latest/dist/dexie.min.js
 
-https://unpkg.com/dexie@latest/dist/dexie.js.map
+https://unpkg.com/dexie@latest/dist/dexie.min.js.map
 
+### Modern:
+https://unpkg.com/dexie@latest/dist/modern/dexie.min.mjs
+
+https://unpkg.com/dexie@latest/dist/modern/dexie.min.mjs.map
+
+### Typings:
 https://unpkg.com/dexie@latest/dist/dexie.d.ts
+
 
 
 Contributing

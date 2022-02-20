@@ -13,9 +13,9 @@ import { Table } from '../table';
 // import { globalEvents } from '../../globals/global-events';
 
 /** Transaction
- *
- * http://dexie.org/docs/Transaction/Transaction
- *
+ * 
+ * https://dexie.org/docs/Transaction/Transaction
+ * 
  **/
 export class Transaction implements ITransaction {
   db: Dexie;
@@ -193,10 +193,10 @@ export class Transaction implements ITransaction {
   }
 
   /** Transaction.waitFor()
-   *
+   * 
    * Internal method. Can be accessed from the public API through
-   * Dexie.waitFor(): http://dexie.org/docs/Dexie/Dexie.waitFor()
-   *
+   * Dexie.waitFor(): https://dexie.org/docs/Dexie/Dexie.waitFor()
+   * 
    **/
   waitFor(promiseLike: PromiseLike<any>) {
     // Always operate on the root transaction (in case this is a sub stransaction)
@@ -234,8 +234,8 @@ export class Transaction implements ITransaction {
   }
 
   /** Transaction.abort()
-   *
-   * http://dexie.org/docs/Transaction/Transaction.abort()
+   * 
+   * https://dexie.org/docs/Transaction/Transaction.abort()
    */
   abort() {
     if (this.active) {
@@ -246,8 +246,8 @@ export class Transaction implements ITransaction {
   }
 
   /** Transaction.table()
-   *
-   * http://dexie.org/docs/Transaction/Transaction.table()
+   * 
+   * https://dexie.org/docs/Transaction/Transaction.table()
    */
   table(tableName: string) {
     const memoizedTables = (this._memoizedTables || (this._memoizedTables = {}));

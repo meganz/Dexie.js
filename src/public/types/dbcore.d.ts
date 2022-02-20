@@ -38,7 +38,7 @@ export interface DBCoreMutateResponse {
 export interface DBCoreAddRequest {
   type: 'add';
   trans: DBCoreTransaction;
-  values: any[];
+  values: readonly any[];
   keys?: any[];
   /** @deprecated Will always get results since 3.1.0-alpha.5 */
   wantResults?: boolean;
@@ -47,7 +47,7 @@ export interface DBCoreAddRequest {
 export interface DBCorePutRequest {
   type: 'put';
   trans: DBCoreTransaction;
-  values: any[];
+  values: readonly any[];
   keys?: any[];
   criteria?: {
     index: string | null;
@@ -148,9 +148,9 @@ export interface DBCoreIndex {
   readonly name: string | null;
   /** True if this index represents the primary key */
   readonly isPrimaryKey?: boolean;
-  /** True if this index represents the primary key and is not inbound (http://dexie.org/docs/inbound) */
-  readonly outbound?: boolean;
-  /** True if and only if keyPath is an array (http://dexie.org/docs/Compound-Index) */
+  /** True if this index represents the primary key and is not inbound (https://dexie.org/docs/inbound) */
+  readonly outbound?: boolean; 
+  /** True if and only if keyPath is an array (https://dexie.org/docs/Compound-Index) */
   readonly compound?: boolean;
   /** keyPath, null for primary key, string for single-property indexes, Array<string> for compound indexes */
   readonly keyPath: null | string | string[];
