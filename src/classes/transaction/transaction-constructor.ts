@@ -16,7 +16,7 @@ export interface TransactionConstructor<T extends Transaction=Transaction> {
 }
 
 /** Generates a Transaction constructor bound to given Dexie instance.
- * 
+ *
  * The purpose of having dynamically created constructors, is to allow
  * addons to extend classes for a certain Dexie instance without affecting
  * other db instances.
@@ -38,7 +38,7 @@ export function createTransactionConstructor(db: Dexie) {
       this.schema = dbschema;
       this.chromeTransactionDurability = chromeTransactionDurability;
       this.idbtrans = null;
-      this.on = Events(this, "complete", "error", "abort");
+      // this.on = Events(this, "complete", "error", "abort");
       this.parent = parent || null;
       this.active = true;
       this._reculock = 0;
@@ -52,21 +52,20 @@ export function createTransactionConstructor(db: Dexie) {
           this._resolve = resolve;
           this._reject = reject;
       });
-      
+
       this._completion.then(
           ()=> {
               this.active = false;
-              this.on.complete.fire();
+              // this.on.complete.fire();
           },
           e => {
               var wasActive = this.active;
               this.active = false;
-              this.on.error.fire(e);
+              // this.on.error.fire(e);
               this.parent ?
                   this.parent._reject(e) :
                   wasActive && this.idbtrans && this.idbtrans.abort();
               return rejection(e); // Indicate we actually DO NOT catch this error.
           });
-    
     });
 }

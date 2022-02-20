@@ -33,7 +33,7 @@ import { dexieOpen } from './dexie-open';
 import { wrap } from '../../helpers/promise';
 import { _onDatabaseDeleted } from '../../helpers/database-enumerator';
 import { eventRejectHandler } from '../../functions/event-wrappers';
-import { extractTransactionArgs, enterTransactionScope } from './transaction-helpers';
+import { enterTransactionScope } from './transaction-helpers';
 import { TransactionMode } from '../../public/types/transaction-mode';
 import { rejection } from '../../helpers/promise';
 import { usePSD } from '../../helpers/promise';
@@ -360,16 +360,14 @@ export class Dexie implements IDexie {
     return keys(this._allTables).map(name => this._allTables[name]);
   }
 
-  transaction(): Promise {
-    const args = extractTransactionArgs.apply(this, arguments);
-    return this._transaction.apply(this, args);
-  }
-
-  _transaction(mode: TransactionMode, tables: Array<ITable | string>, scopeFunc: Function) {
+  transaction(mode: TransactionMode, ...args): Promise {
+    // Let scopeFunc be the last argument and pop it so that args now only contain the table arguments.
+    const scopeFunc = args.pop();
+    const tables = args.flat(); // Support using array as middle argument, or a mix of arrays and non-arrays.
     let parentTransaction = PSD.trans as Transaction | undefined;
     // Check if parent transactions is bound to this db instance, and if caller wants to reuse it
-    if (!parentTransaction || parentTransaction.db !== this || mode.indexOf('!') !== -1) parentTransaction = null;
-    const onlyIfCompatible = mode.indexOf('?') !== -1;
+    if (!parentTransaction || parentTransaction.db !== this || mode.includes('!')) parentTransaction = null;
+    const onlyIfCompatible = mode.includes('?');
     mode = mode.replace('!', '').replace('?', '') as TransactionMode; // Ok. Will change arguments[0] as well but we wont touch arguments henceforth.
     let idbMode: IDBTransactionMode,
         storeNames;

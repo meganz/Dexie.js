@@ -184,8 +184,7 @@ const intrinsicTypeNames =
     .split(',').concat(
         flatten([8,16,32,64].map(num=>["Int","Uint","Float"].map(t=>t+num+"Array")))
     ).filter(t=>_global[t]);
-const intrinsicTypes = intrinsicTypeNames.map(t=>_global[t]);
-export const intrinsicTypeNameSet = arrayToObject(intrinsicTypeNames, x=>[x,true]);
+const intrinsicTypes = new Set(intrinsicTypeNames.map(t=>_global[t]));
 
 let circularRefs: null | WeakMap<any,any> = null;
 export function deepClone<T>(any: T): T {
@@ -205,7 +204,7 @@ function innerDeepClone<T>(any: T): T {
         for (let i = 0, l = any.length; i < l; ++i) {
             rv.push(innerDeepClone(any[i]));
         }
-    } else if (intrinsicTypes.indexOf(any.constructor) >= 0) {
+    } else if (intrinsicTypes.has(any.constructor)) {
         rv = any;
     } else {
         const proto = getProto(any);

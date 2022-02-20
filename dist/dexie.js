@@ -4,7 +4,7 @@
  *
  * By David Fahlander, david.fahlander@gmail.com
  *
- * Version 3.2.0.meganz, 2022-01-18T12:19:53.273Z
+ * Version 3.2.1.meganz, 2022-04-21T11:36:21.436Z
  *
  * https://dexie.org
  *
@@ -178,8 +178,7 @@ function flatten(a) {
 }
 const intrinsicTypeNames = "Boolean,String,Date,RegExp,Blob,File,FileList,FileSystemFileHandle,ArrayBuffer,DataView,Uint8ClampedArray,ImageBitmap,ImageData,Map,Set,CryptoKey"
     .split(',').concat(flatten([8, 16, 32, 64].map(num => ["Int", "Uint", "Float"].map(t => t + num + "Array")))).filter(t => _global[t]);
-const intrinsicTypes = intrinsicTypeNames.map(t => _global[t]);
-arrayToObject(intrinsicTypeNames, x => [x, true]);
+const intrinsicTypes = new Set(intrinsicTypeNames.map(t => _global[t]));
 let circularRefs = null;
 function deepClone(any) {
     circularRefs = new WeakMap();
@@ -200,7 +199,7 @@ function innerDeepClone(any) {
             rv.push(innerDeepClone(any[i]));
         }
     }
-    else if (intrinsicTypes.indexOf(any.constructor) >= 0) {
+    else if (intrinsicTypes.has(any.constructor)) {
         rv = any;
     }
     else {
@@ -412,71 +411,10 @@ fullNameExceptions.BulkError = BulkError;
 
 function nop() { }
 function mirror(val) { return val; }
-function pureFunctionChain(f1, f2) {
-    if (f1 == null || f1 === mirror)
-        return f2;
-    return function (val) {
-        return f2(f1(val));
-    };
-}
 function callBoth(on1, on2) {
     return function () {
         on1.apply(this, arguments);
         on2.apply(this, arguments);
-    };
-}
-function hookCreatingChain(f1, f2) {
-    if (f1 === nop)
-        return f2;
-    return function () {
-        var res = f1.apply(this, arguments);
-        if (res !== undefined)
-            arguments[0] = res;
-        var onsuccess = this.onsuccess,
-        onerror = this.onerror;
-        this.onsuccess = null;
-        this.onerror = null;
-        var res2 = f2.apply(this, arguments);
-        if (onsuccess)
-            this.onsuccess = this.onsuccess ? callBoth(onsuccess, this.onsuccess) : onsuccess;
-        if (onerror)
-            this.onerror = this.onerror ? callBoth(onerror, this.onerror) : onerror;
-        return res2 !== undefined ? res2 : res;
-    };
-}
-function hookDeletingChain(f1, f2) {
-    if (f1 === nop)
-        return f2;
-    return function () {
-        f1.apply(this, arguments);
-        var onsuccess = this.onsuccess,
-        onerror = this.onerror;
-        this.onsuccess = this.onerror = null;
-        f2.apply(this, arguments);
-        if (onsuccess)
-            this.onsuccess = this.onsuccess ? callBoth(onsuccess, this.onsuccess) : onsuccess;
-        if (onerror)
-            this.onerror = this.onerror ? callBoth(onerror, this.onerror) : onerror;
-    };
-}
-function hookUpdatingChain(f1, f2) {
-    if (f1 === nop)
-        return f2;
-    return function (modifications) {
-        var res = f1.apply(this, arguments);
-        extend(modifications, res);
-        var onsuccess = this.onsuccess,
-        onerror = this.onerror;
-        this.onsuccess = null;
-        this.onerror = null;
-        var res2 = f2.apply(this, arguments);
-        if (onsuccess)
-            this.onsuccess = this.onsuccess ? callBoth(onsuccess, this.onsuccess) : onsuccess;
-        if (onerror)
-            this.onerror = this.onerror ? callBoth(onerror, this.onerror) : onerror;
-        return res === undefined ?
-            (res2 === undefined ? undefined : res2) :
-            (extend(res, res2));
     };
 }
 function reverseStoppableEventChain(f1, f2) {
@@ -853,7 +791,7 @@ function callListener(cb, promise, listener) {
             if (rejectingErrors.length)
                 rejectingErrors = [];
             ret = cb(value);
-            if (rejectingErrors.indexOf(value) === -1)
+            if (!rejectingErrors.includes(value))
                 markErrorAsHandled(promise);
         }
         listener.resolve(ret);
@@ -1187,8 +1125,14 @@ function tempTransaction(db, mode, storeNames, fn) {
         var trans = db._createTransaction(mode, storeNames, db._dbSchema);
         try {
             trans.create();
+            db._state.PR1398_maxLoop = 3;
         }
         catch (ex) {
+            if (ex.name === errnames.InvalidState && db.isOpen() && --db._state.PR1398_maxLoop > 0) {
+                console.warn('Dexie: Need to reopen db');
+                db._close();
+                return db.open().then(() => tempTransaction(db, mode, storeNames, fn));
+            }
             return rejection(ex);
         }
         return trans._promise(mode, (resolve, reject) => {
@@ -1202,7 +1146,7 @@ function tempTransaction(db, mode, storeNames, fn) {
     }
 }
 
-const DEXIE_VERSION = '3.2.0.meganz';
+const DEXIE_VERSION = '3.2.1.meganz';
 const maxString = String.fromCharCode(65535);
 const minKey = -Infinity;
 const INVALID_KEY_ARGUMENT = "Invalid key provided. Keys must be of type string, number, Date or Array<string | number | Date>.";
@@ -1242,6 +1186,10 @@ function workaroundForUndefinedPrimKey(keyPath) {
             return obj;
         }
         : (obj) => obj;
+}
+
+function Entity() {
+    throw exceptions.Type();
 }
 
 function cmp(a, b) {
@@ -1346,16 +1294,14 @@ class Table {
         if (keyOrCrit && keyOrCrit.constructor === Object)
             return this.where(keyOrCrit).first(cb);
         return this._trans('readonly', (trans) => {
-            return this.core.get({ trans, key: keyOrCrit })
-                .then(res => this.hook.reading.fire(res));
+            return this.core.get({ trans, key: keyOrCrit });
         }).then(cb);
     }
     getKey(keyOrCrit, cb) {
         if (keyOrCrit && keyOrCrit.constructor === Object)
             return this.where(keyOrCrit).first(cb);
         return this._trans('readonly', (trans) => {
-            return this.core.get({ trans, key: keyOrCrit, method: 'getKey' })
-                .then(res => this.hook.reading.fire(res));
+            return this.core.get({ trans, key: keyOrCrit, method: 'getKey' });
         }).then(cb);
     }
     getKeys(keys) {
@@ -1364,7 +1310,7 @@ class Table {
                 keys,
                 trans,
                 method: 'getKey'
-            }).then(result => result.map(res => this.hook.reading.fire(res)).filter(Boolean));
+            }).then(result => result .filter(Boolean));
         });
     }
     exists(keys) {
@@ -1449,24 +1395,14 @@ class Table {
         return this.toCollection().reverse();
     }
     mapToClass(constructor) {
+        const { db, name: tableName } = this;
         this.schema.mappedClass = constructor;
-        const readHook = obj => {
-            if (!obj)
-                return obj;
-            const res = Object.create(constructor.prototype);
-            for (var m in obj)
-                if (hasOwn(obj, m))
-                    try {
-                        res[m] = obj[m];
-                    }
-                    catch (_) { }
-            return res;
-        };
-        if (this.schema.readHook) {
-            this.hook.reading.unsubscribe(this.schema.readHook);
+        if (constructor.prototype instanceof Entity) {
+            constructor = class extends constructor {
+                get db() { return db; }
+                table() { return tableName; }
+            };
         }
-        this.schema.readHook = readHook;
-        this.hook("reading", readHook);
         return constructor;
     }
     defineClass() {
@@ -1548,7 +1484,7 @@ class Table {
             return this.core.getMany({
                 keys,
                 trans
-            }).then(result => result.map(res => this.hook.reading.fire(res)));
+            });
         });
     }
     bulkAdd(objects, keysOrOptions, options) {
@@ -1609,73 +1545,6 @@ class Table {
     }
 }
 
-function Events(ctx) {
-    var evs = {};
-    var rv = function (eventName, subscriber) {
-        if (subscriber) {
-            var i = arguments.length, args = new Array(i - 1);
-            while (--i)
-                args[i - 1] = arguments[i];
-            evs[eventName].subscribe.apply(null, args);
-            return ctx;
-        }
-        else if (typeof (eventName) === 'string') {
-            return evs[eventName];
-        }
-    };
-    rv.addEventType = add;
-    for (var i = 1, l = arguments.length; i < l; ++i) {
-        add(arguments[i]);
-    }
-    return rv;
-    function add(eventName, chainFunction, defaultFunction) {
-        if (typeof eventName === 'object')
-            return addConfiguredEvents(eventName);
-        if (!chainFunction)
-            chainFunction = reverseStoppableEventChain;
-        if (!defaultFunction)
-            defaultFunction = nop;
-        var context = {
-            subscribers: [],
-            fire: defaultFunction,
-            subscribe: function (cb) {
-                if (context.subscribers.indexOf(cb) === -1) {
-                    context.subscribers.push(cb);
-                    context.fire = chainFunction(context.fire, cb);
-                }
-            },
-            unsubscribe: function (cb) {
-                context.subscribers = context.subscribers.filter(function (fn) { return fn !== cb; });
-                context.fire = context.subscribers.reduce(chainFunction, defaultFunction);
-            }
-        };
-        evs[eventName] = rv[eventName] = context;
-        return context;
-    }
-    function addConfiguredEvents(cfg) {
-        keys(cfg).forEach(function (eventName) {
-            var args = cfg[eventName];
-            if (isArray(args)) {
-                add(eventName, cfg[eventName][0], cfg[eventName][1]);
-            }
-            else if (args === 'asap') {
-                var context = add(eventName, mirror, function fire() {
-                    var i = arguments.length, args = new Array(i);
-                    while (i--)
-                        args[i] = arguments[i];
-                    context.subscribers.forEach(function (fn) {
-                        asap$1(function fireEvent() {
-                            fn.apply(null, args);
-                        });
-                    });
-                });
-            }
-            else
-                throw new exceptions.InvalidArgument("Invalid event config");
-        });
-    }
-}
-
 function makeClassConstructor(prototype, constructor) {
     derive(constructor).from({ prototype });
     return constructor;
@@ -1687,12 +1556,6 @@ function createTableConstructor(db) {
         this._tx = trans;
         this.name = name;
         this.schema = tableSchema;
-        this.hook = db._allTables[name] ? db._allTables[name].hook : Events(null, {
-            "creating": [hookCreatingChain, nop],
-            "reading": [pureFunctionChain, mirror],
-            "updating": [hookUpdatingChain, nop],
-            "deleting": [hookDeletingChain, nop]
-        });
     });
 }
 
@@ -2164,7 +2027,7 @@ function createCollectionConstructor(db) {
             }
         const whereCtx = whereClause._ctx;
         const table = whereCtx.table;
-        const readingHook = table.hook.reading.fire;
+        const readingHook = mirror;
         this._ctx = {
             table: table,
             index: whereCtx.index,
@@ -2615,7 +2478,6 @@ class Transaction {
             preventDefault(ev);
             this.active && this._reject(new exceptions.Abort(idbtrans.error));
             this.active = false;
-            this.on("abort").fire(ev);
         });
         idbtrans.oncomplete = wrap(() => {
             this.active = false;
@@ -2719,7 +2581,6 @@ function createTransactionConstructor(db) {
         this.schema = dbschema;
         this.chromeTransactionDurability = chromeTransactionDurability;
         this.idbtrans = null;
-        this.on = Events(this, "complete", "error", "abort");
         this.parent = parent || null;
         this.active = true;
         this._reculock = 0;
@@ -2735,11 +2596,9 @@ function createTransactionConstructor(db) {
         });
         this._completion.then(() => {
             this.active = false;
-            this.on.complete.fire();
         }, e => {
             var wasActive = this.active;
             this.active = false;
-            this.on.error.fire(e);
             this.parent ?
                 this.parent._reject(e) :
                 wasActive && this.idbtrans && this.idbtrans.abort();
@@ -3513,6 +3372,66 @@ function createVersionConstructor(db) {
     });
 }
 
+function Events(ctx) {
+    var evs = {};
+    var rv = function (eventName, ...args) {
+        if (args[0]) {
+            evs[eventName].subscribe.apply(null, args);
+            return ctx;
+        }
+        else if (typeof (eventName) === 'string') {
+            return evs[eventName];
+        }
+    };
+    rv.addEventType = add;
+    for (var i = 1, l = arguments.length; i < l; ++i) {
+        add(arguments[i]);
+    }
+    return rv;
+    function add(eventName, chainFunction, defaultFunction) {
+        if (typeof eventName === 'object')
+            return addConfiguredEvents(eventName);
+        if (!chainFunction)
+            chainFunction = reverseStoppableEventChain;
+        if (!defaultFunction)
+            defaultFunction = nop;
+        var context = {
+            subscribers: [],
+            fire: defaultFunction,
+            subscribe: function (cb) {
+                if (!context.subscribers.includes(cb)) {
+                    context.subscribers.push(cb);
+                    context.fire = chainFunction(context.fire, cb);
+                }
+            },
+            unsubscribe: function (cb) {
+                context.subscribers = context.subscribers.filter(function (fn) { return fn !== cb; });
+                context.fire = context.subscribers.reduce(chainFunction, defaultFunction);
+            }
+        };
+        evs[eventName] = rv[eventName] = context;
+        return context;
+    }
+    function addConfiguredEvents(cfg) {
+        keys(cfg).forEach(function (eventName) {
+            var args = cfg[eventName];
+            if (isArray(args)) {
+                add(eventName, cfg[eventName][0], cfg[eventName][1]);
+            }
+            else if (args === 'asap') {
+                const context = add(eventName, mirror, (...args) => {
+                    const fire = (fn) => asap$1(() => fn(...args));
+                    for (let i = 0; i < context.subscribers.length; i++) {
+                        fire(context.subscribers[i]);
+                    }
+                });
+            }
+            else
+                throw new exceptions.InvalidArgument("Invalid event config");
+        });
+    }
+}
+
 function getDbNamesTable(indexedDB, IDBKeyRange) {
     let dbNamesDB = indexedDB["_dbNamesDB"];
     if (!dbNamesDB) {
@@ -3692,17 +3611,6 @@ function awaitIterator(iterator) {
     return step(callNext)();
 }
 
-function extractTransactionArgs(mode, _tableArgs_, scopeFunc) {
-    var i = arguments.length;
-    if (i < 2)
-        throw new exceptions.InvalidArgument("Too few arguments");
-    var args = new Array(i - 1);
-    while (--i)
-        args[i - 1] = arguments[i];
-    scopeFunc = args.pop();
-    var tables = flatten(args);
-    return [mode, tables, scopeFunc];
-}
 function enterTransactionScope(db, mode, storeNames, parentTransaction, scopeFunc) {
     return DexiePromise.resolve().then(() => {
         const transless = PSD.transless || PSD;
@@ -3715,7 +3623,18 @@ function enterTransactionScope(db, mode, storeNames, parentTransaction, scopeFun
             trans.idbtrans = parentTransaction.idbtrans;
         }
         else {
-            trans.create();
+            try {
+                trans.create();
+                db._state.PR1398_maxLoop = 3;
+            }
+            catch (ex) {
+                if (ex.name === errnames.InvalidState && db.isOpen() && --db._state.PR1398_maxLoop > 0) {
+                    console.warn('Dexie: Need to reopen db');
+                    db._close();
+                    return db.open().then(() => enterTransactionScope(db, mode, storeNames, null, scopeFunc));
+                }
+                return rejection(ex);
+            }
         }
         const scopeFuncIsAsync = isAsyncFunction(scopeFunc);
         if (scopeFuncIsAsync) {
@@ -3923,7 +3842,8 @@ class Dexie$1 {
             dbReadyPromise: null,
             cancelOpen: nop,
             openCanceller: null,
-            autoSchema: true
+            autoSchema: true,
+            PR1398_maxLoop: 3
         };
         state.dbReadyPromise = new DexiePromise(resolve => {
             state.dbReadyResolve = resolve;
@@ -4113,15 +4033,13 @@ class Dexie$1 {
     get tables() {
         return keys(this._allTables).map(name => this._allTables[name]);
     }
-    transaction() {
-        const args = extractTransactionArgs.apply(this, arguments);
-        return this._transaction.apply(this, args);
-    }
-    _transaction(mode, tables, scopeFunc) {
+    transaction(mode, ...args) {
+        const scopeFunc = args.pop();
+        const tables = args.flat();
         let parentTransaction = PSD.trans;
-        if (!parentTransaction || parentTransaction.db !== this || mode.indexOf('!') !== -1)
+        if (!parentTransaction || parentTransaction.db !== this || mode.includes('!'))
             parentTransaction = null;
-        const onlyIfCompatible = mode.indexOf('?') !== -1;
+        const onlyIfCompatible = mode.includes('?');
         mode = mode.replace('!', '').replace('?', '');
         let idbMode, storeNames;
         try {
@@ -4334,6 +4252,8 @@ setDebug(debug, dexieStackFrameFilter);
 var namedExports = /*#__PURE__*/Object.freeze({
 __proto__: null,
 Dexie: Dexie$1,
+Entity: Entity,
+cmp: cmp,
 'default': Dexie$1
 });
 

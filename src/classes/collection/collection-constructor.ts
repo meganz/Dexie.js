@@ -13,7 +13,7 @@ export interface CollectionConstructor {
 }
 
 /** Generates a Collection constructor bound to given Dexie instance.
- * 
+ *
  * The purpose of having dynamically created constructors, is to allow
  * addons to extend classes for a certain Dexie instance without affecting
  * other db instances.
@@ -37,7 +37,7 @@ export function createCollectionConstructor(db: Dexie) {
 
       const whereCtx = whereClause._ctx;
       const table = whereCtx.table;
-      const readingHook = table.hook.reading.fire;
+      const readingHook = mirror; // table.hook.reading.fire;
       this._ctx = {
         table: table,
         index: whereCtx.index,

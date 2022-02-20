@@ -483,7 +483,7 @@ function callListener (cb, promise, listener) {
             // cb is onRejected
             if (rejectingErrors.length) rejectingErrors = [];
             ret = cb(value);
-            if (rejectingErrors.indexOf(value) === -1)
+            if (!rejectingErrors.includes(value))
                 markErrorAsHandled(promise); // Callback didnt do Promise.reject(err) nor reject(err) onto another promise.
         }
         listener.resolve(ret);

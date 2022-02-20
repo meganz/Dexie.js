@@ -13,9 +13,9 @@ import { Table } from '../table';
 // import { globalEvents } from '../../globals/global-events';
 
 /** Transaction
- * 
+ *
  * https://dexie.org/docs/Transaction/Transaction
- * 
+ *
  **/
 export class Transaction implements ITransaction {
   db: Dexie;
@@ -128,7 +128,7 @@ export class Transaction implements ITransaction {
       preventDefault(ev);
       this.active && this._reject(new exceptions.Abort(idbtrans.error));
       this.active = false;
-      this.on("abort").fire(ev);
+      // this.on("abort").fire(ev);
     });
     idbtrans.oncomplete = wrap(() => {
       this.active = false;
@@ -193,10 +193,10 @@ export class Transaction implements ITransaction {
   }
 
   /** Transaction.waitFor()
-   * 
+   *
    * Internal method. Can be accessed from the public API through
    * Dexie.waitFor(): https://dexie.org/docs/Dexie/Dexie.waitFor()
-   * 
+   *
    **/
   waitFor(promiseLike: PromiseLike<any>) {
     // Always operate on the root transaction (in case this is a sub stransaction)
@@ -234,7 +234,7 @@ export class Transaction implements ITransaction {
   }
 
   /** Transaction.abort()
-   * 
+   *
    * https://dexie.org/docs/Transaction/Transaction.abort()
    */
   abort() {
@@ -246,7 +246,7 @@ export class Transaction implements ITransaction {
   }
 
   /** Transaction.table()
-   * 
+   *
    * https://dexie.org/docs/Transaction/Transaction.table()
    */
   table(tableName: string) {

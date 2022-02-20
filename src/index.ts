@@ -25,5 +25,5 @@ Debug.setDebug(Debug.debug, dexieStackFrameFilter);
 // export { RangeSet, mergeRanges, rangesOverlap } from "./helpers/rangeset";
 export { Dexie }; // Comply with public/index.d.ts.
 export { Entity };
-export { cmp };
+export { cmp };
 export default Dexie;

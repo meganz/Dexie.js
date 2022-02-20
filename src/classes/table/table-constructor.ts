@@ -13,7 +13,7 @@ export interface TableConstructor {
 }
 
 /** Generates a Table constructor bound to given Dexie instance.
- * 
+ *
  * The purpose of having dynamically created constructors, is to allow
  * addons to extend classes for a certain Dexie instance without affecting
  * other db instances.
@@ -27,12 +27,14 @@ export function createTableConstructor (db: Dexie) {
       this._tx = trans;
       this.name = name;
       this.schema = tableSchema;
+      /*
       this.hook = db._allTables[name] ? db._allTables[name].hook : Events(null, {
         "creating": [hookCreatingChain, nop],
         "reading": [pureFunctionChain, mirror],
         "updating": [hookUpdatingChain, nop],
         "deleting": [hookDeletingChain, nop]
       }) as TableHooks;
+      */
     }
 
   );

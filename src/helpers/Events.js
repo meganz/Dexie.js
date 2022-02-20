@@ -4,11 +4,9 @@ import {exceptions} from '../errors';
 
 export default function Events(ctx) {
     var evs = {};
-    var rv = function (eventName, subscriber) {
-        if (subscriber) {
+    var rv = function (eventName, ...args) {
+        if (args[0]) {
             // Subscribe. If additional arguments than just the subscriber was provided, forward them as well.
-            var i = arguments.length, args = new Array(i - 1);
-            while (--i) args[i - 1] = arguments[i];
             evs[eventName].subscribe.apply(null, args);
             return ctx;
         } else if (typeof (eventName) === 'string') {
@@ -17,11 +15,11 @@ export default function Events(ctx) {
         }
     };
     rv.addEventType = add;
-    
+
     for (var i = 1, l = arguments.length; i < l; ++i) {
         add(arguments[i]);
     }
-    
+
     return rv;
 
     function add(eventName, chainFunction, defaultFunction) {
@@ -33,7 +31,7 @@ export default function Events(ctx) {
             subscribers: [],
             fire: defaultFunction,
             subscribe: function (cb) {
-                if (context.subscribers.indexOf(cb) === -1) {
+                if (!context.subscribers.includes(cb)) {
                     context.subscribers.push(cb);
                     context.fire = chainFunction(context.fire, cb);
                 }
@@ -56,16 +54,12 @@ export default function Events(ctx) {
             } else if (args === 'asap') {
                 // Rather than approaching event subscription using a functional approach, we here do it in a for-loop where subscriber is executed in its own stack
                 // enabling that any exception that occur wont disturb the initiator and also not nescessary be catched and forgotten.
-                var context = add(eventName, mirror, function fire() {
-                    // Optimazation-safe cloning of arguments into args.
-                    var i = arguments.length, args = new Array(i);
-                    while (i--) args[i] = arguments[i];
+                const context = add(eventName, mirror, (...args) => {
                     // All each subscriber:
-                    context.subscribers.forEach(function (fn) {
-                        asap(function fireEvent() {
-                            fn.apply(null, args);
-                        });
-                    });
+                    const fire = (fn) => asap(() => fn(...args));
+                    for (let i = 0; i < context.subscribers.length; i++) {
+                        fire(context.subscribers[i]);
+                    }
                 });
             } else throw new exceptions.InvalidArgument("Invalid event config");
         });
