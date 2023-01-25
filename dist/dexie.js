@@ -4,7 +4,7 @@
  *
  * By David Fahlander, david.fahlander@gmail.com
  *
- * Version 3.2.1.meganz, 2022-04-21T11:36:21.436Z
+ * Version 3.2.1.meganz, 2023-01-25T17:04:10.001Z
  *
  * https://dexie.org
  *
@@ -3810,7 +3810,7 @@ const virtualIndexMiddleware = {
     create: createVirtualIndexMiddleware
 };
 
-class Dexie$1 {
+let Dexie$1 = class Dexie {
     constructor(name, options) {
         this._middlewares = {};
         this.verno = 0;
@@ -4098,7 +4098,7 @@ class Dexie$1 {
         }
         return this._allTables[tableName];
     }
-}
+};
 
 function getObjectDiff(a, b, rv, prfx) {
     rv = rv || {};
@@ -4254,7 +4254,7 @@ __proto__: null,
 Dexie: Dexie$1,
 Entity: Entity,
 cmp: cmp,
-'default': Dexie$1
+default: Dexie$1
 });
 
 Object.assign(Dexie$1, namedExports, { default: Dexie$1 });

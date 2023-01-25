@@ -77,7 +77,7 @@
       "# Build dist/dexie.js, and dist/dexie.d.ts",
       "cd src",
       "tsc -t ES2018 [--watch 'Watching for file changes']",
-      "rollup -c ../tools/build-configs/rollup.umd.config.js",
+      "rollup --bundleConfigAsCjs -c ../tools/build-configs/rollup.umd.config.js",
       "node ../tools/replaceVersionAndDate.js ../dist/dexie.js"
     ],
     "release": [
@@ -104,25 +104,25 @@
   },
   "homepage": "https://dexie.org",
   "devDependencies": {
-    "just-build": "0.9.20",
-    "karma": "6.3.19",
+    "just-build": "0.9.24",
+    "karma": "6.4.1",
     "karma-browserstack-launcher": "1.6.0",
     "karma-chrome-launcher": "3.1.1",
     "karma-firefox-launcher": "2.1.2",
     "karma-mocha-reporter": "2.2.5",
     "karma-qunit": "4.1.2",
-    "qunit": "2.18.2",
+    "qunit": "2.19.4",
     "qunitjs": "2.4.1",
-    "rollup": "2.70.2",
+    "rollup": "3.10.1",
     "rollup-plugin-cleanup": "3.2.1",
     "rollup-plugin-commonjs": "10.1.0",
     "rollup-plugin-node-resolve": "5.2.0",
     "rollup-plugin-sourcemaps": "0.6.3",
-    "rxjs": "7.5.5",
+    "rxjs": "7.8.0",
     "safari-14-idb-fix": "3.0.0",
     "serve-static": "1.15.0",
     "sorted-json": "0.2.6",
-    "tslib": "2.3.1",
-    "typescript": "4.6.3"
+    "tslib": "2.4.1",
+    "typescript": "4.9.4"
   }
 }
