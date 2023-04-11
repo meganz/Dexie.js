@@ -113,16 +113,15 @@
     "karma-qunit": "4.1.2",
     "qunit": "2.19.4",
     "qunitjs": "2.4.1",
-    "rollup": "3.10.1",
+    "rollup": "3.20.2",
     "rollup-plugin-cleanup": "3.2.1",
     "rollup-plugin-commonjs": "10.1.0",
     "rollup-plugin-node-resolve": "5.2.0",
     "rollup-plugin-sourcemaps": "0.6.3",
     "rxjs": "7.8.0",
-    "safari-14-idb-fix": "3.0.0",
     "serve-static": "1.15.0",
     "sorted-json": "0.2.6",
-    "tslib": "2.4.1",
-    "typescript": "4.9.4"
+    "tslib": "2.5.0",
+    "typescript": "5.0.4"
   }
 }

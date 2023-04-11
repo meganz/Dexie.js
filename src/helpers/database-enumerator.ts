@@ -19,7 +19,7 @@ function getDbNamesTable(indexedDB: IDBFactory, IDBKeyRange: IDBKeyNamesVar) {
   return dbNamesDB.table("dbnames") as Table<{ name: string }, string>;
 }
 
-function hasDatabasesNative(indexedDB: IDBFactory) {
+export function hasDatabasesNative(indexedDB: IDBFactory) {
   return indexedDB && typeof indexedDB.databases === "function";
 }
 
@@ -29,7 +29,7 @@ export function getDatabaseNames({
 }: DexieDOMDependencies) {
   return hasDatabasesNative(indexedDB)
     ? Promise.resolve(indexedDB.databases()).then((infos) =>
-        infos
+        !Array.isArray(infos) ? [] : infos
           // Select name prop of infos:
           .map((info) => info.name)
           // Filter out DBNAMES_DB as previous Dexie or browser version would not have included it in the result.

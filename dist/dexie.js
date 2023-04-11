@@ -4,7 +4,7 @@
  *
  * By David Fahlander, david.fahlander@gmail.com
  *
- * Version 3.2.1.meganz, 2023-01-25T17:04:10.001Z
+ * Version 3.2.1.meganz, 2023-04-11T16:44:25.566Z
  *
  * https://dexie.org
  *
@@ -2634,6 +2634,39 @@ function createTableSchema(name, primKey, indexes) {
     };
 }
 
+function getDbNamesTable(indexedDB, IDBKeyRange) {
+    let dbNamesDB = indexedDB["_dbNamesDB"];
+    if (!dbNamesDB) {
+        dbNamesDB = indexedDB["_dbNamesDB"] = new Dexie$1(DBNAMES_DB, {
+            addons: [],
+            indexedDB,
+            IDBKeyRange,
+        });
+        dbNamesDB.version(1).stores({ dbnames: "name" });
+    }
+    return dbNamesDB.table("dbnames");
+}
+function hasDatabasesNative(indexedDB) {
+    return indexedDB && typeof indexedDB.databases === "function";
+}
+function getDatabaseNames({ indexedDB, IDBKeyRange, }) {
+    return hasDatabasesNative(indexedDB)
+        ? Promise.resolve(indexedDB.databases()).then((infos) => !Array.isArray(infos) ? [] : infos
+            .map((info) => info.name)
+            .filter((name) => name !== DBNAMES_DB))
+        : getDbNamesTable(indexedDB, IDBKeyRange).toCollection().primaryKeys();
+}
+function _onDatabaseCreated({ indexedDB, IDBKeyRange }, name) {
+    !hasDatabasesNative(indexedDB) &&
+        name !== DBNAMES_DB &&
+        getDbNamesTable(indexedDB, IDBKeyRange).put({ name }).catch(nop);
+}
+function _onDatabaseDeleted({ indexedDB, IDBKeyRange }, name) {
+    !hasDatabasesNative(indexedDB) &&
+        name !== DBNAMES_DB &&
+        getDbNamesTable(indexedDB, IDBKeyRange).delete(name).catch(nop);
+}
+
 function safariMultiStoreFix(storeNames) {
     return storeNames.length === 1 ? storeNames[0] : storeNames;
 }
@@ -2647,6 +2680,30 @@ let getMaxKey = (IdbKeyRange) => {
         getMaxKey = () => maxString;
         return maxString;
     }
+};
+let safari14Workaround = (indexedDB) => {
+    if (!safari14Workaround.pending) {
+        let timer;
+        safari14Workaround.pending = new DexiePromise((resolve) => {
+            if (hasDatabasesNative(indexedDB)) {
+                const isSafari = _global.safari
+                    || (typeof navigator !== 'undefined'
+                        && !navigator.userAgentData
+                        && /Safari\//.test(navigator.userAgent)
+                        && !/Chrom(e|ium)\//.test(navigator.userAgent));
+                if (isSafari) {
+                    const tryIdb = () => getDatabaseNames({ indexedDB, IDBKeyRange: null }).finally(resolve);
+                    timer = setInterval(tryIdb, 100);
+                    return tryIdb();
+                }
+            }
+            resolve();
+        }).finally(() => {
+            clearInterval(timer);
+            safari14Workaround = () => DexiePromise.resolve();
+        });
+    }
+    return safari14Workaround.pending;
 };
 
 function getKeyExtractor(keyPath) {
@@ -3432,58 +3489,11 @@ function Events(ctx) {
     }
 }
 
-function getDbNamesTable(indexedDB, IDBKeyRange) {
-    let dbNamesDB = indexedDB["_dbNamesDB"];
-    if (!dbNamesDB) {
-        dbNamesDB = indexedDB["_dbNamesDB"] = new Dexie$1(DBNAMES_DB, {
-            addons: [],
-            indexedDB,
-            IDBKeyRange,
-        });
-        dbNamesDB.version(1).stores({ dbnames: "name" });
-    }
-    return dbNamesDB.table("dbnames");
-}
-function hasDatabasesNative(indexedDB) {
-    return indexedDB && typeof indexedDB.databases === "function";
-}
-function getDatabaseNames({ indexedDB, IDBKeyRange, }) {
-    return hasDatabasesNative(indexedDB)
-        ? Promise.resolve(indexedDB.databases()).then((infos) => infos
-            .map((info) => info.name)
-            .filter((name) => name !== DBNAMES_DB))
-        : getDbNamesTable(indexedDB, IDBKeyRange).toCollection().primaryKeys();
-}
-function _onDatabaseCreated({ indexedDB, IDBKeyRange }, name) {
-    !hasDatabasesNative(indexedDB) &&
-        name !== DBNAMES_DB &&
-        getDbNamesTable(indexedDB, IDBKeyRange).put({ name }).catch(nop);
-}
-function _onDatabaseDeleted({ indexedDB, IDBKeyRange }, name) {
-    !hasDatabasesNative(indexedDB) &&
-        name !== DBNAMES_DB &&
-        getDbNamesTable(indexedDB, IDBKeyRange).delete(name).catch(nop);
-}
-
 function vip(fn) {
     return newScope(function () {
         PSD.letThrough = true;
         return fn();
     });
-}
-
-function idbReady() {
-    var isSafari = !navigator.userAgentData &&
-        /Safari\//.test(navigator.userAgent) &&
-        !/Chrom(e|ium)\//.test(navigator.userAgent);
-    if (!isSafari || !indexedDB.databases)
-        return Promise.resolve();
-    var intervalId;
-    return new Promise(function (resolve) {
-        var tryIdb = function () { return indexedDB.databases().finally(resolve); };
-        intervalId = setInterval(tryIdb, 100);
-        tryIdb();
-    }).finally(function () { return clearInterval(intervalId); });
 }
 
 function dexieOpen(db) {
@@ -3504,7 +3514,7 @@ function dexieOpen(db) {
     }
     let resolveDbReady = state.dbReadyResolve,
     upgradeTransaction = null, wasCreated = false;
-    return DexiePromise.race([openCanceller, (typeof navigator === 'undefined' ? DexiePromise.resolve() : idbReady()).then(() => new DexiePromise((resolve, reject) => {
+    return DexiePromise.race([openCanceller, safari14Workaround(indexedDB).then(() => new DexiePromise((resolve, reject) => {
             throwIfCancelled();
             if (!indexedDB)
                 throw new exceptions.MissingAPI();
@@ -3814,9 +3824,9 @@ let Dexie$1 = class Dexie {
     constructor(name, options) {
         this._middlewares = {};
         this.verno = 0;
-        const deps = Dexie$1.dependencies;
+        const deps = Dexie.dependencies;
         this._options = options = {
-            addons: Dexie$1.addons,
+            addons: Dexie.addons,
             autoOpen: true,
             indexedDB: deps.indexedDB,
             IDBKeyRange: deps.IDBKeyRange,
@@ -3856,7 +3866,7 @@ let Dexie$1 = class Dexie {
         this.on = Events(this, "populate", "blocked", "versionchange", "close", { ready: [promisableChain, nop] });
         this.on.ready.subscribe = override(this.on.ready.subscribe, subscribe => {
             return (subscriber, bSticky) => {
-                Dexie$1.vip(() => {
+                Dexie.vip(() => {
                     const state = this._state;
                     if (state.openComplete) {
                         if (!state.dbOpenError)
