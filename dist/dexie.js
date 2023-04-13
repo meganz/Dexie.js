@@ -4,7 +4,7 @@
  *
  * By David Fahlander, david.fahlander@gmail.com
  *
- * Version 3.2.1.meganz, 2023-04-11T16:44:25.566Z
+ * Version 3.2.1.meganz, 2023-04-13T14:02:55.955Z
  *
  * https://dexie.org
  *
@@ -83,11 +83,11 @@ function asap$1(fn) {
 }
 function arrayToObject(array, extractor) {
     return array.reduce((result, item, i) => {
-        var nameAndValue = extractor(item, i);
+        const nameAndValue = extractor(item, i);
         if (nameAndValue)
             result[nameAndValue[0]] = nameAndValue[1];
         return result;
-    }, {});
+    }, Object.create(null));
 }
 function tryCatch(fn, onerror, args) {
     try {
@@ -103,36 +103,33 @@ function getByKeyPath(obj, keyPath) {
     if (!keyPath)
         return obj;
     if (typeof keyPath !== 'string') {
-        var rv = [];
-        for (var i = 0, l = keyPath.length; i < l; ++i) {
-            var val = getByKeyPath(obj, keyPath[i]);
-            rv.push(val);
+        const rv = [];
+        for (let i = 0, l = keyPath.length; i < l; ++i) {
+            rv.push(getByKeyPath(obj, keyPath[i]));
         }
         return rv;
     }
-    var period = keyPath.indexOf('.');
+    const period = keyPath.indexOf('.');
     if (period !== -1) {
-        var innerObj = obj[keyPath.substr(0, period)];
+        const innerObj = obj[keyPath.substr(0, period)];
         return innerObj === undefined ? undefined : getByKeyPath(innerObj, keyPath.substr(period + 1));
     }
     return undefined;
 }
 function setByKeyPath(obj, keyPath, value) {
-    if (!obj || keyPath === undefined)
-        return;
-    if ('isFrozen' in Object && Object.isFrozen(obj))
+    if (!obj || keyPath === undefined || Object.isFrozen(obj))
         return;
     if (typeof keyPath !== 'string' && 'length' in keyPath) {
         assert(typeof value !== 'string' && 'length' in value);
-        for (var i = 0, l = keyPath.length; i < l; ++i) {
+        for (let i = 0, l = keyPath.length; i < l; ++i) {
             setByKeyPath(obj, keyPath[i], value[i]);
         }
     }
     else {
-        var period = keyPath.indexOf('.');
+        const period = keyPath.indexOf('.');
         if (period !== -1) {
-            var currentKeyPath = keyPath.substr(0, period);
-            var remainingKeyPath = keyPath.substr(period + 1);
+            const currentKeyPath = keyPath.substr(0, period);
+            const remainingKeyPath = keyPath.substr(period + 1);
             if (remainingKeyPath === "")
                 if (value === undefined) {
                     if (isArray(obj) && !isNaN(parseInt(currentKeyPath)))
@@ -143,9 +140,9 @@ function setByKeyPath(obj, keyPath, value) {
                 else
                     obj[currentKeyPath] = value;
             else {
-                var innerObj = obj[currentKeyPath];
-                if (!innerObj)
-                    innerObj = (obj[currentKeyPath] = {});
+                let innerObj = obj[currentKeyPath];
+                if (!innerObj || !hasOwn(obj, currentKeyPath))
+                    innerObj = (obj[currentKeyPath] = Object.create(null));
                 setByKeyPath(innerObj, remainingKeyPath, value);
             }
         }
@@ -204,7 +201,7 @@ function innerDeepClone(any) {
     }
     else {
         const proto = getProto(any);
-        rv = proto === Object.prototype ? {} : Object.create(proto);
+        rv = Object.create(proto === Object.prototype ? null : proto);
         circularRefs && circularRefs.set(any, rv);
         for (let prop in any) {
             if (hasOwn(any, prop)) {
