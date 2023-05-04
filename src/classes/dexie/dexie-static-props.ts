@@ -67,9 +67,9 @@ props(Dexie, {
   //
   // Static method for retrieving a list of all existing databases at current host.
   //
-  getDatabaseNames(cb) {
+  getDatabaseNames() {
     try {
-      return getDatabaseNames(Dexie.dependencies).then(cb);
+      return getDatabaseNames(Dexie.dependencies);
     } catch {
       return rejection(new exceptions.MissingAPI());
     }

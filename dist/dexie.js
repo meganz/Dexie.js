@@ -4,7 +4,7 @@
  *
  * By David Fahlander, david.fahlander@gmail.com
  *
- * Version 3.2.1.meganz, 2023-04-13T14:02:55.955Z
+ * Version 3.2.1.meganz, 2023-05-04T11:17:49.676Z
  *
  * https://dexie.org
  *
@@ -4165,9 +4165,9 @@ props(Dexie, {
             return true;
         }).catch('NoSuchDatabaseError', () => false);
     },
-    getDatabaseNames(cb) {
+    getDatabaseNames() {
         try {
-            return getDatabaseNames(Dexie.dependencies).then(cb);
+            return getDatabaseNames(Dexie.dependencies);
         }
         catch (_a) {
             return rejection(new exceptions.MissingAPI());
