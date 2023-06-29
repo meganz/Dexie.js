@@ -4,7 +4,7 @@
  *
  * By David Fahlander, david.fahlander@gmail.com
  *
- * Version 3.2.1.meganz, 2023-05-04T11:17:49.676Z
+ * Version 3.2.1.meganz, 2023-06-29T11:23:08.477Z
  *
  * https://dexie.org
  *
@@ -1126,7 +1126,7 @@ function tempTransaction(db, mode, storeNames, fn) {
         }
         catch (ex) {
             if (ex.name === errnames.InvalidState && db.isOpen() && --db._state.PR1398_maxLoop > 0) {
-                console.warn('Dexie: Need to reopen db');
+                console.warn(`Dexie: Need to reopen db '${db.name}'`);
                 db._close();
                 return db.open().then(() => tempTransaction(db, mode, storeNames, fn));
             }
@@ -3636,7 +3636,7 @@ function enterTransactionScope(db, mode, storeNames, parentTransaction, scopeFun
             }
             catch (ex) {
                 if (ex.name === errnames.InvalidState && db.isOpen() && --db._state.PR1398_maxLoop > 0) {
-                    console.warn('Dexie: Need to reopen db');
+                    console.warn(`Dexie: Need to reopen db, '${db.name}'`);
                     db._close();
                     return db.open().then(() => enterTransactionScope(db, mode, storeNames, null, scopeFunc));
                 }
