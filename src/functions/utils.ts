@@ -14,11 +14,9 @@ export function extend<T extends object, X extends object>(obj: T, extension: X)
     return Object.assign(obj, extension) as T & X;
 }
 
+const _hasOwn = {}.hasOwnProperty;
 export const getProto = Object.getPrototypeOf;
-export const _hasOwn = {}.hasOwnProperty;
-export function hasOwn(obj, prop) {
-    return _hasOwn.call(obj, prop);
-}
+export const hasOwn = (obj: object, prop: string) => _hasOwn.call(obj, prop);
 
 export function props (proto, extension) {
     if (typeof extension === 'function') extension = extension(getProto(proto));
@@ -110,7 +108,7 @@ export function tryCatch(fn: (...args: any[])=>void, onerror, args?) : void {
 
 export function getByKeyPath(obj, keyPath) {
     // http://www.w3.org/TR/IndexedDB/#steps-for-extracting-a-key-from-a-value-using-a-key-path
-    if (hasOwn(obj, keyPath)) return obj[keyPath]; // This line is moved from last to first for optimization purpose.
+    if (typeof keyPath === 'string' && hasOwn(obj, keyPath)) return obj[keyPath]; // This line is moved from last to first for optimization purpose.
     if (!keyPath) return obj;
     if (typeof keyPath !== 'string') {
         const rv = [];
@@ -122,7 +120,7 @@ export function getByKeyPath(obj, keyPath) {
     const period = keyPath.indexOf('.');
     if (period !== -1) {
         const innerObj = obj[keyPath.substr(0, period)];
-        return innerObj === undefined ? undefined : getByKeyPath(innerObj, keyPath.substr(period + 1));
+        return innerObj == null ? undefined : getByKeyPath(innerObj, keyPath.substr(period + 1));
     }
     return undefined;
 }
@@ -179,7 +177,7 @@ export function flatten<T> (a: (T | T[])[]) : T[] {
 
 //https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
 const intrinsicTypeNames =
-    "Boolean,String,Date,RegExp,Blob,File,FileList,FileSystemFileHandle,ArrayBuffer,DataView,Uint8ClampedArray,ImageBitmap,ImageData,Map,Set,CryptoKey"
+    "BigUint64Array,BigInt64Array,Array,Boolean,String,Date,RegExp,Blob,File,FileList,FileSystemFileHandle,FileSystemDirectoryHandle,ArrayBuffer,DataView,Uint8ClampedArray,ImageBitmap,ImageData,Map,Set,CryptoKey"
     .split(',').concat(
         flatten([8,16,32,64].map(num=>["Int","Uint","Float"].map(t=>t+num+"Array")))
     ).filter(t=>_global[t]);

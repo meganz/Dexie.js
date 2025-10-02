@@ -38,11 +38,13 @@ export class Table implements ITable<any, IndexableType> {
   {
     const trans: Transaction = this._tx || PSD.trans;
     const tableName = this.name;
+    // @ts-ignore: Use Chrome's Async Stack Tagging API to allow tracing and simplify debugging for dexie users.
+    const task = debug && console.createTask && console.createTask(`Dexie: ${mode === 'readonly' ? 'read' : 'write' } ${this.name}`);
 
     function checkTableInTransaction(resolve, reject, trans: Transaction) {
       if (!trans.schema[tableName])
         throw new exceptions.NotFound("Table " + tableName + " not part of transaction");
-      return fn(trans.idbtrans, trans);
+      return fn(trans.idbtrans, trans) as Promise<any>;
     }
     // Surround all in a microtick scope.
     // Reason: Browsers (modern Safari + older others)
@@ -59,11 +61,19 @@ export class Table implements ITable<any, IndexableType> {
     // in native engine.
     const wasRootExec = beginMicroTickScope();
     try {
-      return trans && trans.db === this.db ?
+      let p = trans && trans.db === this.db ?
         trans === PSD.trans ?
           trans._promise(mode, checkTableInTransaction, writeLocked) :
           newScope(() => trans._promise(mode, checkTableInTransaction, writeLocked), { trans: trans, transless: PSD.transless || PSD }) :
         tempTransaction(this.db, mode, [this.name], checkTableInTransaction);
+      if (task) { // Dexie.debug = true so we trace errors
+        p._consoleTask = task;
+        p = p.catch(err => {
+          console.trace(err);
+          return rejection(err);
+        });
+      }
+      return p;
     } finally {
       if (wasRootExec) endMicroTickScope();
     }
@@ -92,6 +102,7 @@ export class Table implements ITable<any, IndexableType> {
   getKey(keyOrCrit, cb?) {
     if (keyOrCrit && keyOrCrit.constructor === Object)
       return this.where(keyOrCrit as { [key: string]: IndexableType }).first(cb);
+    if (keyOrCrit == null) return rejection(new exceptions.Type(`Invalid argument to Table.get()`));
 
     return this._trans('readonly', (trans) => {
       return this.core.get({trans, key: keyOrCrit, method: 'getKey'})
@@ -144,17 +155,26 @@ export class Table implements ITable<any, IndexableType> {
     // Multiple criterias.
     // Let's try finding a compound index that matches all keyPaths in
     // arbritary order:
-    const compoundIndex = this.schema.indexes.concat(this.schema.primKey).filter(ix =>
-      ix.compound &&
-      keyPaths.every(keyPath => ix.keyPath.indexOf(keyPath) >= 0) &&
-      (ix.keyPath as string[]).every(keyPath => keyPaths.indexOf(keyPath) >= 0))[0];
+    const compoundIndex = this.schema.indexes.concat(this.schema.primKey).filter(ix => {
+      if (
+        ix.compound &&
+        keyPaths.every(keyPath => ix.keyPath.includes(keyPath))) {
+          for (let i=0; i<keyPaths.length; ++i) {
+             if (!keyPaths.includes(ix.keyPath[i])) return false;
+          }
+          return true;
+        }
+        return false;
+      }).sort((a,b) => a.keyPath.length - b.keyPath.length)[0];
 
-    if (compoundIndex && this.db._maxKey !== maxString)
+    if (compoundIndex && this.db._maxKey !== maxString) {
       // Cool! We found such compound index
       // and this browser supports compound indexes (maxKey !== maxString)!
+      const keyPathsInValidOrder = (compoundIndex.keyPath as string[]).slice(0, keyPaths.length);
       return this
-        .where(compoundIndex.name)
-        .equals((compoundIndex.keyPath as string[]).map(kp => indexOrCrit[kp]));
+        .where(keyPathsInValidOrder)
+        .equals(keyPathsInValidOrder.map(kp => indexOrCrit[kp]));
+    }
 
     if (!compoundIndex && debug) console.warn(
       `The query ${JSON.stringify(indexOrCrit)} on ${this.name} would benefit of a ` +

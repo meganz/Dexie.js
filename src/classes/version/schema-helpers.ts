@@ -8,7 +8,6 @@ import Promise, { PSD, newScope, NativePromise, decrementExpectedAwaits, increme
 import { exceptions } from '../../errors';
 import { TableSchema } from '../../public/types/table-schema';
 import { IndexSpec } from '../../public/types/index-spec';
-import { hasIEDeleteObjectStoreBug, isIEOrEdge } from '../../globals/constants';
 import { safariMultiStoreFix } from '../../functions/quirks';
 import { createIndexSpec, nameFromKeyPath } from '../../helpers/index-spec';
 import { createTableSchema } from '../../helpers/table-schema';
@@ -101,7 +100,7 @@ export function updateTablesAndIndexes(
       globalSchema = db._dbSchema = newSchema;
 
       const diff = getSchemaDiff(oldSchema, newSchema);
-      // Add tables           
+      // Add tables
       diff.add.forEach(tuple => {
         createTable(idbUpgradeTrans, tuple[0], tuple[1].primKey, tuple[1].indexes);
       });
@@ -151,7 +150,7 @@ export function updateTablesAndIndexes(
         if (contentUpgradeIsAsync) {
           incrementExpectedAwaits();
         }
-        
+
         let returnValue: any;
         const promiseFollowed = Promise.follow(() => {
           // Finally, call the scope function with our table and transaction arguments.
@@ -169,11 +168,9 @@ export function updateTablesAndIndexes(
       }
     });
     queue.push(idbtrans => {
-      if (!anyContentUpgraderHasRun || !hasIEDeleteObjectStoreBug) { // Dont delete old tables if ieBug is present and a content upgrader has run. Let tables be left in DB so far. This needs to be taken care of.
-        const newSchema = version._cfg.dbschema;
-        // Delete old tables
-        deleteRemovedTables(newSchema, idbtrans);
-      }
+      const newSchema = version._cfg.dbschema;
+      // Delete old tables
+      deleteRemovedTables(newSchema, idbtrans);
       // Restore the final API
       removeTablesApi(db, [db.Transaction.prototype]);
       setApiOnPlace(db, [db.Transaction.prototype], db._storeNames, db._dbSchema);
@@ -239,7 +236,7 @@ export function getSchemaDiff(oldSchema: DbSchema, newSchema: DbSchema): SchemaD
             ''+(newDef.primKey.keyPath||'')
           ) ||
             // Compare the autoIncrement flag also
-          (oldDef.primKey.auto !== newDef.primKey.auto && !isIEOrEdge)) // IE has bug reading autoIncrement prop.
+          (oldDef.primKey.auto !== newDef.primKey.auto)) // IE has bug reading autoIncrement prop.
       {
         // Primary key has changed. Remove and re-add table.
         change.recreate = true;

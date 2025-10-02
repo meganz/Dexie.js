@@ -5,7 +5,7 @@
 import {tryCatch, props, setProp, _global,
     getPropertyDescriptor, getArrayOf, extend, getProto} from '../functions/utils';
 import {nop, callBoth, mirror} from '../functions/chaining-functions';
-import {debug, prettyStack, getErrorWithStack} from './debug';
+import {debug} from './debug';
 import {exceptions} from '../errors';
 
 //
@@ -19,7 +19,6 @@ import {exceptions} from '../errors';
 // another strategy now that simplifies everything a lot: to always execute callbacks in a new micro-task, but have an own micro-task
 // engine that is indexedDB compliant across all browsers.
 // Promise class has also been optimized a lot with inspiration from bluebird - to avoid closures as much as possible.
-// Also with inspiration from bluebird, asyncronic stacks in debug mode.
 //
 // Specific non-standard features of this Promise class:
 // * Custom zone support (a.k.a. PSD) with ability to keep zones also when using native promises as well as
@@ -35,11 +34,7 @@ import {exceptions} from '../errors';
 // Used in Promise constructor to emulate a private constructor.
 var INTERNAL = {};
 
-// Async stacks (long stacks) must not grow infinitely.
 const
-    LONG_STACKS_CLIP_LIMIT = 100,
-    // When calling error.stack or promise.stack, limit the number of asyncronic stacks to print out.
-    MAX_LONG_STACKS = 20,
     ZONE_ECHO_LIMIT = 100,
     [resolvedNativePromise, nativePromiseProto, resolvedGlobalPromise] = (()=>{
             let globalP = Promise.resolve();
@@ -56,8 +51,6 @@ const
 
 export const NativePromise = resolvedNativePromise && resolvedNativePromise.constructor;
 const patchGlobalPromise = !!resolvedGlobalPromise;
-
-var stack_being_generated = false;
 
 /* The default function used only for the very first promise in a promise chain.
    As soon as then promise is resolved or rejected, all next tasks will be executed in micro ticks
@@ -87,7 +80,6 @@ var isOutsideMicroTick = true, // True when NOT in a virtual microTick.
     needsNewPhysicalTick = true, // True when a push to microtickQueue must also schedulePhysicalTick()
     unhandledErrors = [], // Rejected promises that has occured. Used for triggering 'unhandledrejection'.
     rejectingErrors = [], // Tracks if errors are being re-rejected during onRejected callback.
-    currentFulfiller = null,
     rejectionMapper = mirror; // Remove in next major when removing error mapping of DOMErrors and DOMExceptions
 
 export var globalPSD = {
@@ -127,12 +119,6 @@ export default function DexiePromise(fn) {
     // Current async scope
     var psd = (this._PSD = PSD);
 
-    if (debug) {
-        this._stackHolder = getErrorWithStack();
-        this._prev = null;
-        this._numPrev = 0; // Number of previous promises (for long stacks)
-    }
-
     if (typeof fn !== 'function') {
         if (fn !== INTERNAL) throw new TypeError('Not a function');
         // Private constructor (INTERNAL, state, value).
@@ -166,7 +152,7 @@ const thenProp = {
                     reject,
                     psd));
             });
-            debug && linkToPreviousPromise(rv, this);
+            if (this._consoleTask) rv._consoleTask = this._consoleTask;
             return rv;
         }
 
@@ -224,21 +210,6 @@ props(DexiePromise.prototype, {
         });
     },
 
-    stack: {
-        get: function() {
-            if (this._stack) return this._stack;
-            try {
-                stack_being_generated = true;
-                var stacks = getStack (this, [], MAX_LONG_STACKS);
-                var stack = stacks.join("\nFrom previous: ");
-                if (this._state !== null) this._stack = stack; // Stack may be updated on reject.
-                return stack;
-            } finally {
-                stack_being_generated = false;
-            }
-        }
-    },
-
     timeout: function (ms, msg) {
         return ms < Infinity ?
             new DexiePromise((resolve, reject) => {
@@ -285,9 +256,7 @@ props (DexiePromise, {
         if (value && typeof value.then === 'function') return new DexiePromise((resolve, reject)=>{
             value.then(resolve, reject);
         });
-        var rv = new DexiePromise(INTERNAL, true, value);
-        linkToPreviousPromise(rv, currentFulfiller);
-        return rv;
+        return new DexiePromise(INTERNAL, true, value);
     },
 
     reject: PromiseReject,
@@ -410,18 +379,6 @@ function handleRejection (promise, reason) {
     reason = rejectionMapper(reason);
     promise._state = false;
     promise._value = reason;
-    debug && reason !== null && typeof reason === 'object' && !reason._promise && tryCatch(()=> {
-        var origProp = getPropertyDescriptor(reason, "stack");
-        reason._promise = promise;
-        setProp(reason, "stack", {
-            get: () =>
-                stack_being_generated ?
-                    origProp && (origProp.get ?
-                    origProp.get.apply(reason) :
-                    origProp.value) :
-                    promise.stack
-        });
-    });
     // Add the failure to a list of possibly uncaught errors
     addPossiblyUnhandledError(promise);
     propagateAllListeners(promise);
@@ -468,67 +425,22 @@ function propagateToListener(promise, listener) {
 
 function callListener (cb, promise, listener) {
     try {
-        // Set static variable currentFulfiller to the promise that is being fullfilled,
-        // so that we connect the chain of promises (for long stacks support)
-        currentFulfiller = promise;
-
         // Call callback and resolve our listener with it's return value.
         var ret, value = promise._value;
 
-        if (promise._state) {
-            // cb is onResolved
-            ret = cb (value);
-        } else {
-            // cb is onRejected
-            if (rejectingErrors.length) rejectingErrors = [];
-            ret = cb(value);
-            if (!rejectingErrors.includes(value))
-                markErrorAsHandled(promise); // Callback didnt do Promise.reject(err) nor reject(err) onto another promise.
+        if (!promise._state && rejectingErrors.length) rejectingErrors = [];
+        // cb is onResolved
+        ret = debug && promise._consoleTask ? promise._consoleTask.run(()=>cb (value)) : cb (value);
+        if (!promise._state && rejectingErrors.indexOf(value) === -1) {
+            markErrorAsHandled(promise); // Callback didnt do Promise.reject(err) nor reject(err) onto another promise.
         }
         listener.resolve(ret);
     } catch (e) {
         // Exception thrown in callback. Reject our listener.
         listener.reject(e);
     } finally {
-        // Restore env and currentFulfiller.
-        currentFulfiller = null;
         if (--numScheduledCalls === 0) finalizePhysicalTick();
         --listener.psd.ref || listener.psd.finalize();
-    }
-}
-
-function getStack (promise, stacks, limit) {
-    if (stacks.length === limit) return stacks;
-    var stack = "";
-    if (promise._state === false) {
-        var failure = promise._value,
-            errorName,
-            message;
-
-        if (failure != null) {
-            errorName = failure.name || "Error";
-            message = failure.message || failure;
-            stack = prettyStack(failure, 0);
-        } else {
-            errorName = failure; // If error is undefined or null, show that.
-            message = "";
-        }
-        stacks.push(errorName + (message ? ": " + message : "") + stack);
-    }
-    if (debug) {
-        stack = prettyStack(promise._stackHolder, 2);
-        if (stack && stacks.indexOf(stack) === -1) stacks.push(stack);
-        if (promise._prev) getStack(promise._prev, stacks, limit);
-    }
-    return stacks;
-}
-
-function linkToPreviousPromise(promise, prev) {
-    // Support long stacks by linking to previous completed promise.
-    var numPrev = prev ? prev._numPrev + 1 : 0;
-    if (numPrev < LONG_STACKS_CLIP_LIMIT) { // Prohibit infinite Promise loops to get an infinite long memory consuming "tail".
-        promise._prev = prev;
-        promise._numPrev = numPrev;
     }
 }
 
@@ -657,7 +569,6 @@ export function newScope (fn, props, a1, a2) {
     psd.global = false;
     psd.id = ++zone_id_counter;
     // Prepare for promise patching (done in usePSD):
-    var globalEnv = globalPSD.env;
     psd.env = patchGlobalPromise ? {
         Promise: DexiePromise, // Changing window.Promise could be omitted for Chrome and Edge, where IDB+Promise plays well!
         PromiseProp: {value: DexiePromise, configurable: true, writable: true},
@@ -666,9 +577,7 @@ export function newScope (fn, props, a1, a2) {
         allSettled: DexiePromise.allSettled,
         any: DexiePromise.any,
         resolve: DexiePromise.resolve,
-        reject: DexiePromise.reject,
-        nthen: getPatchedPromiseThen (globalEnv.nthen, psd), // native then
-        gthen: getPatchedPromiseThen (globalEnv.gthen, psd) // global then
+        reject: DexiePromise.reject
     } : {};
     if (props) extend(psd, props);
 
@@ -756,11 +665,6 @@ function switchToZone (targetZone, bEnteringZone) {
         // Swich environments (may be PSD-zone or the global zone. Both apply.)
         var targetEnv = targetZone.env;
 
-        // Change Promise.prototype.then for native and global Promise (they MAY differ on polyfilled environments, but both can be accessed)
-        // Must be done on each zone change because the patched method contains targetZone in its closure.
-        nativePromiseProto.then = targetEnv.nthen;
-        GlobalPromise.prototype.then = targetEnv.gthen;
-
         if (currentZone.global || targetZone.global) {
             // Leaving or entering global zone. It's time to patch / restore global Promise.
 
@@ -789,9 +693,7 @@ function snapShot () {
         allSettled: GlobalPromise.allSettled,
         any: GlobalPromise.any,
         resolve: GlobalPromise.resolve,
-        reject: GlobalPromise.reject,
-        nthen: nativePromiseProto.then,
-        gthen: GlobalPromise.prototype.then
+        reject: GlobalPromise.reject
     } : {};
 }
 
@@ -820,14 +722,6 @@ function nativeAwaitCompatibleWrap(fn, zone, possibleAwait, cleanup) {
             switchToZone(outerZone, false);
             if (cleanup) enqueueNativeMicroTask(decrementExpectedAwaits);
         }
-    };
-}
-
-function getPatchedPromiseThen (origThen, zone) {
-    return function (onResolved, onRejected) {
-        return origThen.call(this,
-            nativeAwaitCompatibleWrap(onResolved, zone),
-            nativeAwaitCompatibleWrap(onRejected, zone));
     };
 }
 
